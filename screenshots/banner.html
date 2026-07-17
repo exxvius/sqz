@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>sqz — banner</title>
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { background: #0b1512; }
+      .banner {
+        position: relative;
+        width: 1280px;
+        height: 440px;
+        overflow: hidden;
+        font-family: "DM Sans", system-ui, sans-serif;
+        background:
+          radial-gradient(1100px 520px at 82% -18%, rgba(56, 224, 176, 0.16), transparent 60%),
+          radial-gradient(760px 420px at 8% 120%, rgba(34, 185, 140, 0.12), transparent 62%),
+          linear-gradient(140deg, #12201c 0%, #16302a 55%, #1c3a30 100%);
+        color: #eafcf5;
+        display: flex;
+        align-items: center;
+        padding: 0 96px;
+      }
+      /* faint diagonal texture */
+      .banner::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image: repeating-linear-gradient(
+          115deg,
+          rgba(255, 255, 255, 0.022) 0px,
+          rgba(255, 255, 255, 0.022) 1px,
+          transparent 1px,
+          transparent 34px
+        );
+        pointer-events: none;
+      }
+      .content { position: relative; z-index: 1; max-width: 760px; }
+      .mark-row { display: flex; align-items: center; gap: 26px; margin-bottom: 30px; }
+      .mark {
+        width: 96px; height: 96px; border-radius: 24px;
+        background: linear-gradient(150deg, #12201c, #1c3a30);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255,255,255,0.06);
+        display: grid; place-items: center;
+      }
+      .wordmark {
+        font-size: 108px; font-weight: 700; letter-spacing: -0.04em; line-height: 1;
+        background: linear-gradient(180deg, #ffffff, #b9f3e2);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .tagline {
+        font-size: 33px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.32;
+        color: #eafcf5;
+      }
+      .tagline b {
+        font-weight: 700;
+        background: linear-gradient(90deg, #38e0b0, #22b98c);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .sub {
+        margin-top: 22px; font-size: 20px; font-weight: 500; color: #8fb7ac;
+        display: flex; align-items: center; gap: 14px;
+      }
+      .dot { width: 5px; height: 5px; border-radius: 50%; background: #3a5a50; }
+      .pill {
+        position: absolute; right: 88px; top: 50%; transform: translateY(-50%);
+        z-index: 1;
+        width: 300px; height: 300px; border-radius: 50%;
+        background: radial-gradient(circle at 38% 32%, rgba(56,224,176,0.22), rgba(34,185,140,0.05) 62%, transparent 70%);
+        display: grid; place-items: center;
+      }
+      .pill svg { filter: drop-shadow(0 10px 30px rgba(0,0,0,0.4)); }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      <div class="content">
+        <div class="mark-row">
+          <div class="mark">
+            <svg width="60" height="60" viewBox="0 0 512 512" fill="none">
+              <g stroke="url(#a)" stroke-width="30" stroke-linecap="round" fill="none">
+                <path d="M150 150 L256 232 L362 150" />
+                <path d="M150 362 L256 280 L362 362" />
+              </g>
+              <rect x="150" y="244" width="212" height="24" rx="12" fill="url(#a)" />
+              <defs>
+                <linearGradient id="a" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#38e0b0" />
+                  <stop offset="1" stop-color="#22b98c" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="wordmark">sqz</div>
+        </div>
+        <div class="tagline">
+          Bulk re-encode your library to <b>modern codecs</b>.<br />
+          Reclaim disk space. <b>Never lose a file.</b>
+        </div>
+        <div class="sub">
+          <span>AV1 · HEVC · H.264</span><span class="dot"></span>
+          <span>Windows · macOS · Linux</span><span class="dot"></span>
+          <span>~6&nbsp;MB</span>
+        </div>
+      </div>
+
+      <div class="pill">
+        <svg width="188" height="188" viewBox="0 0 512 512" fill="none">
+          <rect width="512" height="512" rx="112" fill="url(#bg)" />
+          <g stroke="url(#ac)" stroke-width="26" stroke-linecap="round" fill="none">
+            <path d="M150 150 L256 232 L362 150" />
+            <path d="M150 362 L256 280 L362 362" />
+          </g>
+          <rect x="150" y="244" width="212" height="24" rx="12" fill="url(#ac)" />
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#12201c" />
+              <stop offset="1" stop-color="#1c3a30" />
+            </linearGradient>
+            <linearGradient id="ac" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38e0b0" />
+              <stop offset="1" stop-color="#22b98c" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+  </body>
+</html>
