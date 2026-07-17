@@ -65,3 +65,17 @@ jobs:
           releaseBody: "Tiny sqz installers. FFmpeg is downloaded on first run (or bring your own). See NOTICE for licensing."
           releaseDraft: true
           prerelease: false
+
+      # tauri-action only attaches bundle installers (NSIS/MSI/…), not the raw
+      # binary. Attach the standalone portable .exe too — it's self-contained
+      # (no sidecars) and runs without installation on Windows 10/11.
+      - name: Attach portable Windows binary
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          out="sqz_${ver}_x64_portable.exe"
+          cp "src-tauri/target/${{ matrix.triple }}/release/sqz.exe" "$out"
+          gh release upload "$GITHUB_REF_NAME" "$out" --clobber
