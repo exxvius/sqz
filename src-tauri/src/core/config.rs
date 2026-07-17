@@ -13,9 +13,16 @@ pub const DEFAULT_MAX_HEIGHT: u32 = 1080;
 pub const DEFAULT_MIN_SAVINGS: f64 = 0.10;
 /// Concurrent FFmpeg jobs (2–3 is ideal on a single hardware encoder).
 pub const DEFAULT_WORKERS: usize = 2;
-/// Early abort: once past this progress fraction, project final size and kill
-/// encodes that clearly won't beat the size gate.
-pub const DEFAULT_ABORT_CHECK_AT: f64 = 0.30;
+/// Staged early-abort checkpoints (progress fractions) and thresholds.
+/// Stage 1: at 5%, bail if the projection is badly bloated (+25% or more).
+/// Stage 2: at 10%, bail if already under the savings gate AND getting worse.
+/// Stage 3: 25%–75%, bail the moment the projection drops under the gate.
+/// Stage 4: after 75%, only bail if savings fall under a small floor (3%).
+pub const DEFAULT_ABORT_STAGE1_AT: f64 = 0.05;
+pub const DEFAULT_ABORT_BLOAT_MARGIN: f64 = 0.25;
+pub const DEFAULT_ABORT_CHECK_AT: f64 = 0.10;
+pub const DEFAULT_ABORT_LATE_AT: f64 = 0.75;
+pub const DEFAULT_ABORT_LATE_MIN_SAVINGS: f64 = 0.03;
 /// Predictive skip threshold (bits per pixel); sources already below this are
 /// unlikely to shrink meaningfully.
 pub const DEFAULT_MARGINAL_BPP: f64 = 0.05;
@@ -126,8 +133,15 @@ pub struct Config {
     pub skip_marginal: bool,
     pub marginal_bpp: f64,
     pub early_abort: bool,
+    pub abort_stage1_at: f64,
+    pub abort_bloat_margin: f64,
     pub abort_check_at: f64,
+    pub abort_late_at: f64,
+    pub abort_late_min_savings: f64,
     pub retry_failed: bool,
+    /// Remux skipped/aborted files into the target container (`.mkv`) without
+    /// re-encoding, so an entire library ends up in one format.
+    pub normalize_container: bool,
 }
 
 impl Default for Config {
@@ -152,8 +166,13 @@ impl Default for Config {
             skip_marginal: false,
             marginal_bpp: DEFAULT_MARGINAL_BPP,
             early_abort: true,
+            abort_stage1_at: DEFAULT_ABORT_STAGE1_AT,
+            abort_bloat_margin: DEFAULT_ABORT_BLOAT_MARGIN,
             abort_check_at: DEFAULT_ABORT_CHECK_AT,
+            abort_late_at: DEFAULT_ABORT_LATE_AT,
+            abort_late_min_savings: DEFAULT_ABORT_LATE_MIN_SAVINGS,
             retry_failed: true,
+            normalize_container: false,
         }
     }
 }

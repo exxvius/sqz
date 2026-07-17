@@ -2,10 +2,12 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
+use super::abort::{AbortConfig, AbortJudge, AbortProjection};
 use super::config::Config;
-use super::encode::{build_args, run_encode, AbortProjection};
+use super::encode::{build_args, build_remux_args, run_encode, ProgressSample};
 use super::encoders::Encoder;
 use super::ffbin::FfBin;
 use super::manifest::{mtime_secs, Manifest, StatusUpdate};
@@ -14,6 +16,13 @@ use super::probe::{probe, MediaInfo};
 use super::report::{Outcome, ProcessResult, Reporter};
 use super::util::human_bytes;
 use super::verify::{verify_output, VerifyReason};
+
+fn is_mkv(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("mkv"))
+        .unwrap_or(false)
+}
 
 /// Skip files already in the target codec at/under the height cap. Avoids
 /// pointless re-encodes and prevents reprocessing our own output.
@@ -53,20 +62,119 @@ fn set(manifest: &Manifest, path: &str, outcome: Outcome, upd: StatusUpdate) {
     }
 }
 
+fn meta_of(info: &MediaInfo) -> StatusUpdate {
+    StatusUpdate {
+        src_codec: info.codec.clone(),
+        height: info.height,
+        ..Default::default()
+    }
+}
+
+/// Record a skip — or, when container normalization is on and the source isn't
+/// already `.mkv`, remux it into the target container first.
+#[allow(clippy::too_many_arguments)]
+fn skip_or_normalize(
+    ff: &FfBin,
+    cfg: &Config,
+    manifest: &Manifest,
+    info: &MediaInfo,
+    src: &Path,
+    path_str: &str,
+    size: u64,
+    skip: Outcome,
+    cancel: &(dyn Fn() -> bool + Sync),
+    reporter: &dyn Reporter,
+) -> ProcessResult {
+    if cfg.normalize_container && !cfg.dry_run && !is_mkv(src) {
+        if let Some(r) = try_remux(ff, cfg, manifest, info, src, path_str, size, cancel, reporter) {
+            return r;
+        }
+    }
+    set(manifest, path_str, skip, meta_of(info));
+    ProcessResult::new(path_str, skip)
+}
+
+/// Remux (stream-copy) a source into the target MKV container. Returns the
+/// resulting [`ProcessResult`], or `None` if it couldn't be normalized (caller
+/// falls back to recording the plain skip).
+#[allow(clippy::too_many_arguments)]
+fn try_remux(
+    ff: &FfBin,
+    cfg: &Config,
+    manifest: &Manifest,
+    info: &MediaInfo,
+    src: &Path,
+    path_str: &str,
+    size: u64,
+    cancel: &(dyn Fn() -> bool + Sync),
+    reporter: &dyn Reporter,
+) -> Option<ProcessResult> {
+    let temp_dir = temp_dir_for(src, cfg).ok()?;
+    let out = temp_dir.join(format!("sqz_{}.mkv", uuid::Uuid::new_v4().simple()));
+    let args = build_remux_args(info, &out);
+
+    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    reporter.on_file_start(path_str, &name, info.duration, size);
+    let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
+    let enc = run_encode(&ff.ffmpeg, &args, cancel, &mut on_progress, None);
+    reporter.on_file_end(path_str);
+
+    if enc.cancelled {
+        cleanup(&out);
+        return Some(ProcessResult::new(path_str, Outcome::Cancelled));
+    }
+    if enc.returncode != Some(0) {
+        cleanup(&out);
+        return None; // couldn't remux; keep the original as a plain skip
+    }
+    let playable = probe(&ff.ffprobe, &out, Duration::from_secs(120))
+        .map(|oi| oi.duration.is_some())
+        .unwrap_or(false);
+    let out_size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+    if !playable || out_size == 0 {
+        cleanup(&out);
+        return None;
+    }
+    if super::replace::replace_original(cfg, src, &out).is_err() {
+        cleanup(&out);
+        return None;
+    }
+    let saved = size as i64 - out_size as i64;
+    set(manifest, path_str, Outcome::Normalized, StatusUpdate {
+        out_size: Some(out_size),
+        saved_bytes: Some(saved),
+        ..meta_of(info)
+    });
+    let mut r = ProcessResult::new(path_str, Outcome::Normalized);
+    r.saved_bytes = saved;
+    r.orig_size = Some(size);
+    r.out_size = Some(out_size);
+    Some(r)
+}
+
 /// Process one file end to end. Returns the run-local [`ProcessResult`]; the
 /// durable status is written to the manifest along the way.
+#[allow(clippy::too_many_arguments)]
 pub fn process_file(
     ff: &FfBin,
     cfg: &Config,
     encoder: &Encoder,
     manifest: &Manifest,
     path_str: &str,
-    cancel: &AtomicBool,
+    forced: bool,
+    global_cancel: &AtomicBool,
+    file_cancel: &AtomicBool,
     reporter: &dyn Reporter,
 ) -> ProcessResult {
     let src = Path::new(path_str);
+    // A per-file force flag (from a "force process" action) OR the run-wide force.
+    let force = cfg.force || forced;
+    // Stop this file if the whole run is cancelled OR this file was aborted.
+    let cancelled = || {
+        global_cancel.load(Ordering::Relaxed) || file_cancel.load(Ordering::Relaxed)
+    };
 
-    if cancel.load(Ordering::Relaxed) {
+    if cancelled() {
         return ProcessResult::new(path_str, Outcome::Cancelled);
     }
 
@@ -107,14 +215,18 @@ pub fn process_file(
         ..Default::default()
     };
 
-    if !cfg.force && is_already_efficient(cfg, &info) {
-        set(manifest, path_str, Outcome::SkippedEfficient, meta_upd(&info));
-        return ProcessResult::new(path_str, Outcome::SkippedEfficient);
+    if !force && is_already_efficient(cfg, &info) {
+        return skip_or_normalize(
+            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedEfficient, &cancelled,
+            reporter,
+        );
     }
 
-    if !cfg.force && cfg.skip_marginal && predicted_marginal(cfg, &info) {
-        set(manifest, path_str, Outcome::SkippedMarginal, meta_upd(&info));
-        return ProcessResult::new(path_str, Outcome::SkippedMarginal);
+    if !force && cfg.skip_marginal && predicted_marginal(cfg, &info) {
+        return skip_or_normalize(
+            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedMarginal, &cancelled,
+            reporter,
+        );
     }
 
     if cfg.dry_run {
@@ -144,33 +256,15 @@ pub fn process_file(
     let out = temp_dir.join(format!("sqz_{}.mkv", uuid::Uuid::new_v4().simple()));
     let args = build_args(cfg, &info, encoder, &out);
 
-    // Early-abort predicate: project final size from bytes written past the
-    // check point; abort if it clearly won't beat the size gate.
-    let duration = info.duration.unwrap_or(0.0);
-    let threshold = size as f64 * (1.0 - cfg.min_savings);
-    let abort_pred = move |sec: f64, out_bytes: Option<u64>| -> Option<AbortProjection> {
-        if !cfg.early_abort || duration <= 0.0 {
-            return None;
-        }
-        let out_bytes = out_bytes?;
-        if out_bytes == 0 {
-            return None;
-        }
-        let frac = sec / duration;
-        if frac < cfg.abort_check_at {
-            return None;
-        }
-        let projected = out_bytes as f64 / frac;
-        (projected > threshold).then_some(AbortProjection { frac, projected })
-    };
+    // Staged early-abort judge, driven by ffmpeg progress ticks.
+    let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));
+    let abort_pred = |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
 
     let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     reporter.on_file_start(path_str, &name, info.duration, size);
 
-    let mut on_progress = |sec: f64, out_bytes: Option<u64>| {
-        reporter.on_file_progress(path_str, sec, out_bytes);
-    };
-    let enc = run_encode(&ff.ffmpeg, &args, cancel, &mut on_progress, Some(&abort_pred));
+    let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
+    let enc = run_encode(&ff.ffmpeg, &args, &cancelled, &mut on_progress, Some(&abort_pred));
     reporter.on_file_end(path_str);
 
     if enc.cancelled {
@@ -187,6 +281,12 @@ pub fn process_file(
             human_bytes(proj.projected),
             human_bytes(size as f64)
         );
+        // Even a no-gain file can be normalized to the target container.
+        if cfg.normalize_container && !is_mkv(src) {
+            if let Some(r) = try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter) {
+                return r;
+            }
+        }
         set(manifest, path_str, Outcome::SkippedNoGain, StatusUpdate {
             error: Some(msg.clone()),
             ..meta_upd(&info)
@@ -212,6 +312,13 @@ pub fn process_file(
     if !vr.ok {
         cleanup(&out);
         if vr.reason == VerifyReason::NoGain {
+            if cfg.normalize_container && !is_mkv(src) {
+                if let Some(r) =
+                    try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter)
+                {
+                    return r;
+                }
+            }
             set(manifest, path_str, Outcome::SkippedNoGain, StatusUpdate {
                 out_size: Some(vr.out_size),
                 ..meta_upd(&info)

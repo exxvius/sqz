@@ -10,7 +10,9 @@ use serde::Serialize;
 
 // Terminal statuses are never reprocessed on resume (unless the file changed).
 pub const STATUS_PENDING: &str = "pending";
+pub const STATUS_PROCESSING: &str = "processing";
 pub const STATUS_DONE: &str = "done";
+pub const STATUS_NORMALIZED: &str = "normalized";
 pub const STATUS_SKIPPED_EFFICIENT: &str = "skipped_already_efficient";
 pub const STATUS_SKIPPED_NO_GAIN: &str = "skipped_no_gain";
 pub const STATUS_SKIPPED_MARGINAL: &str = "skipped_marginal";
@@ -27,7 +29,8 @@ CREATE TABLE IF NOT EXISTS files (
     out_size    INTEGER,
     saved_bytes INTEGER,
     error       TEXT,
-    updated_at  REAL
+    updated_at  REAL,
+    forced      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -43,15 +46,29 @@ pub struct StatusUpdate {
     pub error: Option<String>,
 }
 
-/// A completed-file row for the UI history view.
+/// A file row for the UI history view (any status).
 #[derive(Debug, Clone, Serialize)]
 pub struct HistoryRow {
     pub path: String,
+    pub status: String,
+    pub size: Option<u64>,
     pub src_codec: Option<String>,
     pub height: Option<u32>,
     pub out_size: Option<u64>,
     pub saved_bytes: Option<i64>,
+    pub error: Option<String>,
     pub updated_at: Option<f64>,
+}
+
+/// Filters for a history query. Empty/`None` fields match everything.
+#[derive(Debug, Default, Clone)]
+pub struct HistoryQuery {
+    /// Restrict to these statuses (empty = all).
+    pub statuses: Vec<String>,
+    /// Case-insensitive substring match on the path.
+    pub search: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
 }
 
 fn now() -> f64 {
@@ -74,8 +91,14 @@ impl Manifest {
         let conn = Connection::open(db_path)?;
         // journal_mode=WAL returns a result row, so it must go through
         // execute_batch (pragma_update rejects statements that yield rows).
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        // WAL + a busy timeout so the run thread and command connections (which
+        // both write) don't trip over each other with SQLITE_BUSY.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
+        )?;
         conn.execute_batch(SCHEMA)?;
+        // Migration for manifests created before per-file force existed.
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN forced INTEGER DEFAULT 0", []);
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -172,25 +195,157 @@ impl Manifest {
         )
     }
 
-    /// Most-recently completed files, newest first, for the history view.
-    pub fn recent_done(&self, limit: i64) -> rusqlite::Result<Vec<HistoryRow>> {
+    /// Atomically claim the next pending file, marking it `processing` so no other
+    /// worker takes it. Returns the path and whether it was flagged force-process.
+    pub fn claim_next_pending(&self) -> rusqlite::Result<Option<ClaimedFile>> {
+        use rusqlite::OptionalExtension;
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT path, src_codec, height, out_size, saved_bytes, updated_at \
-             FROM files WHERE status=?1 ORDER BY updated_at DESC LIMIT ?2",
+        let claimed: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT path, COALESCE(forced, 0) FROM files WHERE status=?1 \
+                 ORDER BY updated_at LIMIT 1",
+                params![STATUS_PENDING],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((path, forced)) = &claimed {
+            conn.execute(
+                "UPDATE files SET status=?1, updated_at=?2 WHERE path=?3",
+                params![STATUS_PROCESSING, now(), path],
+            )?;
+            return Ok(Some(ClaimedFile {
+                path: path.clone(),
+                forced: *forced != 0,
+            }));
+        }
+        Ok(None)
+    }
+
+    /// Reset any rows left `processing` by a previous crash back to `pending`.
+    pub fn recover_processing(&self) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET status=?1 WHERE status=?2",
+            params![STATUS_PENDING, STATUS_PROCESSING],
         )?;
-        let rows = stmt.query_map(params![STATUS_DONE, limit], |r| {
-            Ok(HistoryRow {
-                path: r.get(0)?,
-                src_codec: r.get(1)?,
-                height: r.get::<_, Option<i64>>(2)?.and_then(|v| u32::try_from(v).ok()),
-                out_size: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
-                saved_bytes: r.get(4)?,
-                updated_at: r.get(5)?,
-            })
-        })?;
+        Ok(())
+    }
+
+    /// Re-queue a file (retry). With `force`, it bypasses the skip checks.
+    pub fn requeue(&self, path: &str, force: bool) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET status=?1, forced=?2, error=NULL, out_size=NULL, \
+             saved_bytes=NULL, updated_at=?3 WHERE path=?4",
+            params![STATUS_PENDING, force as i64, now(), path],
+        )?;
+        Ok(())
+    }
+
+    pub fn total_reclaimed(&self) -> rusqlite::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(SUM(saved_bytes), 0) FROM files WHERE saved_bytes > 0",
+            [],
+            |r| r.get(0),
+        )
+    }
+
+    /// Query history rows with optional status filter + path search, paged.
+    pub fn history(&self, q: &HistoryQuery) -> rusqlite::Result<Vec<HistoryRow>> {
+        use rusqlite::types::Value;
+        let conn = self.conn.lock().unwrap();
+
+        let mut sql = String::from(
+            "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, updated_at \
+             FROM files",
+        );
+        let mut conds: Vec<String> = Vec::new();
+        let mut args: Vec<Value> = Vec::new();
+
+        if !q.statuses.is_empty() {
+            let ph = vec!["?"; q.statuses.len()].join(",");
+            conds.push(format!("status IN ({ph})"));
+            args.extend(q.statuses.iter().map(|s| Value::Text(s.clone())));
+        }
+        if let Some(search) = &q.search {
+            if !search.is_empty() {
+                conds.push("LOWER(path) LIKE ?".into());
+                args.push(Value::Text(format!("%{}%", search.to_lowercase())));
+            }
+        }
+        if !conds.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conds.join(" AND "));
+        }
+        sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
+        args.push(Value::Integer(if q.limit > 0 { q.limit } else { 500 }));
+        args.push(Value::Integer(q.offset.max(0)));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), row_to_history)?;
         rows.collect()
     }
+
+    /// Delete one row from the manifest.
+    pub fn delete_one(&self, path: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM files WHERE path=?1", params![path])?;
+        Ok(())
+    }
+
+    /// Delete every row matching a history filter (used for "remove filtered").
+    pub fn delete_matching(&self, q: &HistoryQuery) -> rusqlite::Result<usize> {
+        use rusqlite::types::Value;
+        let conn = self.conn.lock().unwrap();
+        let mut sql = String::from("DELETE FROM files");
+        let mut conds: Vec<String> = Vec::new();
+        let mut args: Vec<Value> = Vec::new();
+        if !q.statuses.is_empty() {
+            let ph = vec!["?"; q.statuses.len()].join(",");
+            conds.push(format!("status IN ({ph})"));
+            args.extend(q.statuses.iter().map(|s| Value::Text(s.clone())));
+        }
+        if let Some(search) = &q.search {
+            if !search.is_empty() {
+                conds.push("LOWER(path) LIKE ?".into());
+                args.push(Value::Text(format!("%{}%", search.to_lowercase())));
+            }
+        }
+        if !conds.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conds.join(" AND "));
+        }
+        conn.execute(&sql, rusqlite::params_from_iter(args))
+    }
+
+    /// Wipe the entire manifest.
+    pub fn clear(&self) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM files", [])?;
+        Ok(())
+    }
+}
+
+/// A file claimed for processing.
+#[derive(Debug, Clone)]
+pub struct ClaimedFile {
+    pub path: String,
+    pub forced: bool,
+}
+
+fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
+    Ok(HistoryRow {
+        path: r.get(0)?,
+        status: r.get(1)?,
+        size: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+        src_codec: r.get(3)?,
+        height: r.get::<_, Option<i64>>(4)?.and_then(|v| u32::try_from(v).ok()),
+        out_size: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+        saved_bytes: r.get(6)?,
+        error: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
 }
 
 /// Current mtime of a path as fractional Unix seconds (for change detection).

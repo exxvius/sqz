@@ -38,6 +38,7 @@ impl ProcessResult {
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Done,
+    Normalized,
     SkippedEfficient,
     SkippedMarginal,
     SkippedNoGain,
@@ -53,6 +54,7 @@ impl Outcome {
         use super::manifest::*;
         match self {
             Outcome::Done => Some(STATUS_DONE),
+            Outcome::Normalized => Some(STATUS_NORMALIZED),
             Outcome::SkippedEfficient => Some(STATUS_SKIPPED_EFFICIENT),
             Outcome::SkippedMarginal => Some(STATUS_SKIPPED_MARGINAL),
             Outcome::SkippedNoGain => Some(STATUS_SKIPPED_NO_GAIN),
@@ -65,10 +67,12 @@ impl Outcome {
 /// Sink for live engine progress. Implementations must be cheap and thread-safe;
 /// several worker threads call these concurrently.
 pub trait Reporter: Send + Sync {
+    /// The run is starting with `total` files queued to process.
+    fn on_run_start(&self, total: usize);
     /// A file's encode is starting. `duration` seconds, `src_size` bytes.
     fn on_file_start(&self, path: &str, name: &str, duration: Option<f64>, src_size: u64);
-    /// Encode progress tick: `sec` encoded, `out_bytes` written so far.
-    fn on_file_progress(&self, path: &str, sec: f64, out_bytes: Option<u64>);
+    /// One ffmpeg progress tick for the file.
+    fn on_file_progress(&self, path: &str, sample: super::encode::ProgressSample);
     /// The file's active progress bar can be cleared.
     fn on_file_end(&self, path: &str);
     /// A file reached a terminal outcome (append to the event log / stats).
@@ -79,8 +83,9 @@ pub trait Reporter: Send + Sync {
 pub struct NoopReporter;
 
 impl Reporter for NoopReporter {
+    fn on_run_start(&self, _: usize) {}
     fn on_file_start(&self, _: &str, _: &str, _: Option<f64>, _: u64) {}
-    fn on_file_progress(&self, _: &str, _: f64, _: Option<u64>) {}
+    fn on_file_progress(&self, _: &str, _: super::encode::ProgressSample) {}
     fn on_file_end(&self, _: &str) {}
     fn on_record(&self, _: &ProcessResult) {}
 }

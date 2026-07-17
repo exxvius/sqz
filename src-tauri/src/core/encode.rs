@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use super::abort::AbortProjection;
 use super::config::Config;
 use super::encoders::{Encoder, EncoderFamily};
 use super::probe::MediaInfo;
@@ -27,11 +28,19 @@ pub struct EncodeResult {
     pub abort_projection: Option<AbortProjection>,
 }
 
-/// Recorded when an in-progress encode is projected to miss the size gate.
-#[derive(Debug, Clone, Copy)]
-pub struct AbortProjection {
-    pub frac: f64,
-    pub projected: f64,
+/// A single ffmpeg progress tick, parsed from `-progress pipe:1`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProgressSample {
+    /// Encoded position, seconds.
+    pub sec: f64,
+    /// Output bytes written so far.
+    pub out_bytes: Option<u64>,
+    /// Encoding rate, frames/sec.
+    pub fps: Option<f64>,
+    /// Realtime multiple (e.g. 3.2 = 3.2× realtime).
+    pub speed: Option<f64>,
+    /// Current output bitrate, kbit/s.
+    pub bitrate_kbps: Option<f64>,
 }
 
 /// NVENC wants 4:2:0; pick 10-bit (p010le) for 10/12-bit sources else 8-bit.
@@ -147,12 +156,50 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     a
 }
 
-/// Progress callback: `(encoded_seconds, current_output_bytes)`. `Send` so the
-/// scoped progress thread can own the borrow.
-pub type ProgressCb<'a> = &'a mut (dyn FnMut(f64, Option<u64>) + Send);
+/// Build args to remux a source into the target MKV container without
+/// re-encoding (stream copy). Used to normalize a library to one format.
+pub fn build_remux_args(info: &MediaInfo, out_path: &Path) -> Vec<String> {
+    let mut a: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-nostdin".into(),
+        "-y".into(),
+        "-nostats".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-i".into(),
+        info.path.to_string_lossy().into_owned(),
+    ];
+    a.extend(
+        [
+            "-map", "0:V?", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?",
+            "-map_metadata", "0", "-map_chapters", "0", "-c", "copy",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+    a.extend(subtitle_args(info).iter().map(|s| s.to_string()));
+    a.push("-max_muxing_queue_size".into());
+    a.push("1024".into());
+    a.push(out_path.to_string_lossy().into_owned());
+    a
+}
+
+/// Progress callback, one call per ffmpeg progress block. `Send` so the scoped
+/// progress thread can own the borrow.
+pub type ProgressCb<'a> = &'a mut (dyn FnMut(ProgressSample) + Send);
 /// Abort predicate: return `Some(projection)` to kill the encode early. `Sync`
 /// so a shared `&` is `Send` into the progress thread.
 pub type AbortCb<'a> = &'a (dyn Fn(f64, Option<u64>) -> Option<AbortProjection> + Sync);
+
+/// Parse a numeric ffmpeg progress value, stripping a trailing unit and treating
+/// "N/A" as unknown.
+fn parse_num(raw: &str) -> Option<f64> {
+    let s = raw.trim().trim_end_matches("x").trim_end_matches("kbits/s");
+    if s.is_empty() || s.eq_ignore_ascii_case("N/A") {
+        return None;
+    }
+    s.parse::<f64>().ok()
+}
 
 /// Run FFmpeg, terminating promptly if `cancel` is set or `should_abort` fires.
 ///
@@ -162,7 +209,7 @@ pub type AbortCb<'a> = &'a (dyn Fn(f64, Option<u64>) -> Option<AbortProjection> 
 pub fn run_encode(
     ffmpeg: &Path,
     args: &[String],
-    cancel: &AtomicBool,
+    cancel: &(dyn Fn() -> bool + Sync),
     on_progress: ProgressCb<'_>,
     should_abort: Option<AbortCb<'_>>,
 ) -> EncodeResult {
@@ -204,26 +251,37 @@ pub fn run_encode(
             }
         });
 
-        // progress pump → parse `total_size` / `out_time_us`, fire callback + abort.
+        // progress pump → accumulate a block's key=value fields, then fire the
+        // callback + abort check on the block terminator (`progress=...`).
         scope.spawn(|| {
-            let mut last_size: Option<u64> = None;
+            let mut sample = ProgressSample::default();
             if let Some(s) = stdout {
                 for line in BufReader::new(s).lines().map_while(Result::ok) {
-                    if let Some(raw) = line.strip_prefix("total_size=") {
-                        last_size = raw.trim().parse::<u64>().ok();
-                    } else if let Some(raw) = line.strip_prefix("out_time_us=") {
-                        if let Ok(us) = raw.trim().parse::<i64>() {
-                            let sec = us as f64 / 1_000_000.0;
-                            on_progress(sec, last_size);
+                    let Some((key, val)) = line.split_once('=') else {
+                        continue;
+                    };
+                    match key {
+                        "total_size" => sample.out_bytes = val.trim().parse::<u64>().ok(),
+                        "out_time_us" => {
+                            if let Ok(us) = val.trim().parse::<i64>() {
+                                sample.sec = us as f64 / 1_000_000.0;
+                            }
+                        }
+                        "fps" => sample.fps = parse_num(val),
+                        "speed" => sample.speed = parse_num(val),
+                        "bitrate" => sample.bitrate_kbps = parse_num(val),
+                        "progress" => {
+                            on_progress(sample);
                             if let Some(pred) = should_abort {
                                 if !abort_flag.load(Ordering::Relaxed) {
-                                    if let Some(proj) = pred(sec, last_size) {
+                                    if let Some(proj) = pred(sample.sec, sample.out_bytes) {
                                         *projection.lock().unwrap() = Some(proj);
                                         abort_flag.store(true, Ordering::Relaxed);
                                     }
                                 }
                             }
                         }
+                        _ => {}
                     }
                 }
             }
@@ -248,7 +306,7 @@ pub fn run_encode(
                 }
             }
 
-            let cancelled = cancel.load(Ordering::Relaxed);
+            let cancelled = cancel();
             let aborted = abort_flag.load(Ordering::Relaxed);
             if cancelled || aborted {
                 let _ = child.kill();

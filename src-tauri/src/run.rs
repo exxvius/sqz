@@ -1,9 +1,13 @@
-//! Run orchestration: discovery, resume bookkeeping, and a bounded worker pool
-//! of threads each calling `process_file`, with cooperative cancel and pause.
+//! Run orchestration: discovery, resume bookkeeping, and a bounded worker pool.
+//!
+//! Workers pull the next file to process from the manifest itself, so files
+//! re-queued mid-run (retry / force) are picked up live. Each in-flight file has
+//! its own cancel token in a shared registry, letting the UI abort one file
+//! without stopping the whole run.
 
-use std::collections::VecDeque;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -19,13 +23,14 @@ use crate::core::paths::all_temp_dirs;
 use crate::core::pipeline::{process_file, scan_into_manifest};
 use crate::core::report::{Outcome, Reporter};
 
-/// Rolling tally of a run, surfaced to the UI summary.
+/// Per-file cancel tokens for files currently being processed, keyed by path.
+pub type ActiveMap = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
+
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct RunSummary {
     pub done: u64,
-    pub skipped_efficient: u64,
-    pub skipped_marginal: u64,
-    pub skipped_no_gain: u64,
+    pub normalized: u64,
+    pub skipped: u64,
     pub failed: u64,
     pub would: u64,
     pub saved_bytes: i64,
@@ -35,7 +40,6 @@ pub struct RunSummary {
     pub interrupted: bool,
 }
 
-/// Remove leftover encode temp files from a prior interrupted run.
 fn clean_orphans(temp_dirs: &[PathBuf]) {
     for d in temp_dirs {
         if let Ok(entries) = std::fs::read_dir(d) {
@@ -57,9 +61,15 @@ fn tally(summary: &Mutex<RunSummary>, outcome: Outcome, saved: i64) {
             s.done += 1;
             s.saved_bytes += saved;
         }
-        Outcome::SkippedEfficient => s.skipped_efficient += 1,
-        Outcome::SkippedMarginal => s.skipped_marginal += 1,
-        Outcome::SkippedNoGain => s.skipped_no_gain += 1,
+        Outcome::Normalized => {
+            s.normalized += 1;
+            if saved > 0 {
+                s.saved_bytes += saved;
+            }
+        }
+        Outcome::SkippedEfficient | Outcome::SkippedMarginal | Outcome::SkippedNoGain => {
+            s.skipped += 1;
+        }
         Outcome::Failed => s.failed += 1,
         Outcome::DryRun => s.would += 1,
         Outcome::Cancelled => {}
@@ -69,9 +79,9 @@ fn tally(summary: &Mutex<RunSummary>, outcome: Outcome, saved: i64) {
     }
 }
 
-/// Discover, resume, and process all pending files. Blocks until the run ends
-/// (all files done, or cancelled). `cancel`/`paused` are shared with the caller
-/// so the UI can steer a run in flight.
+/// Discover, resume, and process pending files until the queue drains or the run
+/// is cancelled. `cancel`/`paused`/`active` are shared with the caller so the UI
+/// can steer a run in flight.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     ff: &FfBin,
@@ -81,27 +91,29 @@ pub fn run(
     reporter: &dyn Reporter,
     cancel: &Arc<AtomicBool>,
     paused: &Arc<AtomicBool>,
+    active: &ActiveMap,
 ) -> RunSummary {
+    let _ = manifest.recover_processing();
+
     let files = discover(cfg);
     for f in &files {
         scan_into_manifest(manifest, cfg, f);
     }
-    let pending = manifest.pending_paths().unwrap_or_default();
+    let pending = manifest.pending_paths().map(|v| v.len()).unwrap_or(0);
+    reporter.on_run_start(pending);
 
-    let mut summary = RunSummary {
+    let summary = Mutex::new(RunSummary {
         total_discovered: files.len(),
-        pending: pending.len(),
+        pending,
         ..Default::default()
-    };
+    });
 
-    if pending.is_empty() {
-        return summary;
+    if pending == 0 {
+        return summary.into_inner().unwrap();
     }
 
     clean_orphans(&all_temp_dirs(cfg, &files));
-
-    let queue: Mutex<VecDeque<String>> = Mutex::new(pending.into_iter().collect());
-    let summary_mtx = Mutex::new(summary.clone());
+    let in_flight = AtomicUsize::new(0);
 
     thread::scope(|scope| {
         for _ in 0..cfg.workers {
@@ -109,7 +121,6 @@ pub fn run(
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                // Cooperative pause: hold between files while paused.
                 while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
                     thread::sleep(Duration::from_millis(120));
                 }
@@ -117,21 +128,52 @@ pub fn run(
                     break;
                 }
 
-                let next = queue.lock().unwrap().pop_front();
-                let path = match next {
-                    Some(p) => p,
-                    None => break, // queue drained
+                let claimed = match manifest.claim_next_pending() {
+                    Ok(Some(c)) => c,
+                    Ok(None) => {
+                        // Nothing to claim. Exit only when no one else is working
+                        // either (so mid-run re-queues can still be picked up).
+                        if in_flight.load(Ordering::Relaxed) == 0 {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(150));
+                        continue;
+                    }
+                    Err(_) => break,
                 };
 
-                let result =
-                    process_file(ff, cfg, encoder, manifest, &path, cancel, reporter);
-                tally(&summary_mtx, result.outcome, result.saved_bytes);
+                in_flight.fetch_add(1, Ordering::Relaxed);
+                let file_cancel = Arc::new(AtomicBool::new(false));
+                active
+                    .lock()
+                    .unwrap()
+                    .insert(claimed.path.clone(), Arc::clone(&file_cancel));
+
+                let result = process_file(
+                    ff,
+                    cfg,
+                    encoder,
+                    manifest,
+                    &claimed.path,
+                    claimed.forced,
+                    cancel,
+                    &file_cancel,
+                    reporter,
+                );
+
+                active.lock().unwrap().remove(&claimed.path);
+                in_flight.fetch_sub(1, Ordering::Relaxed);
+
+                tally(&summary, result.outcome, result.saved_bytes);
                 reporter.on_record(&result);
             });
         }
     });
 
-    summary = summary_mtx.into_inner().unwrap();
-    summary.interrupted = cancel.load(Ordering::Relaxed);
-    summary
+    // Reset any files left mid-flight by a cancel back to pending for resume.
+    let _ = manifest.recover_processing();
+
+    let mut out = summary.into_inner().unwrap();
+    out.interrupted = cancel.load(Ordering::Relaxed);
+    out
 }

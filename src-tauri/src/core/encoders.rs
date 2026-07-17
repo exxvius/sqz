@@ -113,8 +113,12 @@ pub fn list_available(ffmpeg: &Path) -> HashSet<String> {
     names
 }
 
-/// Confirm an encoder actually works by encoding one synthetic frame to null.
+/// Confirm an encoder actually works by encoding a short synthetic clip to null.
 /// Presence in `-encoders` does not guarantee a usable driver/hardware.
+///
+/// `-pix_fmt yuv420p` is required: `testsrc` emits yuv444p, which several
+/// hardware encoders (notably av1_nvenc) reject with a misleading "no capable
+/// devices" error — the same 4:2:0 format the real encode uses avoids that.
 pub fn validate(ffmpeg: &Path, encoder: &str, timeout: Duration) -> bool {
     let mut cmd = command_no_window(ffmpeg);
     cmd.args([
@@ -124,9 +128,9 @@ pub fn validate(ffmpeg: &Path, encoder: &str, timeout: Duration) -> bool {
         "-f",
         "lavfi",
         "-i",
-        "testsrc=size=256x256:rate=1:duration=1",
-        "-frames:v",
-        "1",
+        "testsrc=size=256x256:rate=30:duration=1",
+        "-pix_fmt",
+        "yuv420p",
         "-c:v",
         encoder,
         "-f",

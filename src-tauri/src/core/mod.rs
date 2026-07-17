@@ -5,6 +5,7 @@
 //! replace → manifest → discover → pipeline, with `ffbin` locating the bundled
 //! binaries and `report` providing the frontend boundary.
 
+pub mod abort;
 pub mod config;
 pub mod discover;
 pub mod encode;

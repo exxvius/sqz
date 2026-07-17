@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use super::config::{Config, HOLDING_DIRNAME, TEMP_DIRNAME};
 
 /// Walk up from `path` to the first ancestor that exists on disk.
+#[cfg(unix)]
 fn nearest_existing(path: &Path) -> PathBuf {
     let mut p = path;
     loop {

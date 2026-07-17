@@ -66,17 +66,20 @@ fn decode_probe(ffmpeg: &Path, cfg: &Config, out_path: &Path) -> (bool, String) 
         Ok(o) => o,
         Err(e) => return (false, format!("decode probe launch failed: {e}")),
     };
+    // `-xerror` makes ffmpeg exit non-zero on a real decode error, so the exit
+    // code is authoritative. stderr may carry benign warnings on a clean rc=0
+    // decode; treating those as fatal wrongly fails good encodes.
+    if out.status.success() {
+        return (true, String::new());
+    }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stderr = stderr.trim();
-    if !out.status.success() || !stderr.is_empty() {
-        let detail: String = if stderr.is_empty() {
-            format!("rc={}", out.status.code().unwrap_or(-1))
-        } else {
-            stderr.chars().take(400).collect()
-        };
-        return (false, detail);
-    }
-    (true, String::new())
+    let detail: String = if stderr.is_empty() {
+        format!("rc={}", out.status.code().unwrap_or(-1))
+    } else {
+        stderr.chars().take(400).collect()
+    };
+    (false, detail)
 }
 
 /// The four gates, in order: structural probe, duration match, decode probe,
