@@ -7,21 +7,21 @@
 pub mod commands;
 pub mod core;
 pub mod events;
+pub mod ffsetup;
 pub mod run;
 
 use tauri::Manager;
 
 use crate::commands::AppState;
-use crate::core::ffbin::FfBin;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // Per-user data dir holds the manifest, settings, and logs.
+            // Per-user data dir holds the manifest, settings, logs, and the
+            // downloaded FFmpeg binaries.
             let data_dir = app
                 .path()
                 .app_data_dir()
@@ -29,29 +29,30 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).ok();
 
             init_logging(&data_dir);
-
-            let ff = FfBin::resolve();
-            if !ff.is_present() {
-                tracing::warn!(
-                    ffmpeg = %ff.ffmpeg.display(),
-                    ffprobe = %ff.ffprobe.display(),
-                    "bundled ffmpeg/ffprobe not found; falling back to PATH"
-                );
-            }
-
-            app.manage(AppState::new(ff, data_dir));
+            app.manage(AppState::new(data_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::ffmpeg_status,
+            commands::download_ffmpeg,
+            commands::set_ffmpeg_paths,
+            commands::clear_ffmpeg_override,
+            commands::open_path,
+            commands::reveal_path,
             commands::detect_encoders,
             commands::scan_inputs,
             commands::start_run,
             commands::pause_run,
             commands::resume_run,
             commands::cancel_run,
+            commands::abort_file,
+            commands::retry_file,
+            commands::force_file,
             commands::is_running,
             commands::get_history,
+            commands::delete_history_item,
+            commands::delete_history_matching,
+            commands::clear_history,
             commands::get_settings,
             commands::save_settings,
         ])
