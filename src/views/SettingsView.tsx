@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { NumberField } from "../components/atoms";
+import { useState } from "react";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import { FfmpegSetup } from "../components/FfmpegSetup";
 import { api } from "../lib/api";
 import type { Theme } from "../lib/theme";
 import type { FfStatus } from "../lib/types";
@@ -7,30 +8,18 @@ import type { FfStatus } from "../lib/types";
 interface Props {
   theme: Theme;
   toggleTheme: () => void;
+  ff: FfStatus | null;
+  refreshFf: () => void;
 }
 
-export function SettingsView({ theme, toggleTheme }: Props) {
-  const [ff, setFf] = useState<FfStatus | null>(null);
-  const [defaults, setDefaults] = useState<Record<string, unknown>>({});
-
-  useEffect(() => {
-    api.ffmpegStatus().then(setFf);
-    api.getSettings().then(setDefaults);
-  }, []);
-
-  const save = (patch: Record<string, unknown>) => {
-    const next = { ...defaults, ...patch };
-    setDefaults(next);
-    api.saveSettings(next);
-  };
-
-  const workers = (defaults.workers as number) ?? 2;
+export function SettingsView({ theme, toggleTheme, ff, refreshFf }: Props) {
+  const [cleared, setCleared] = useState(false);
 
   return (
     <div className="view">
       <div className="view-head">
         <h2>Settings</h2>
-        <p>Defaults for new runs, appearance, and bundled tooling.</p>
+        <p>Appearance, bundled tooling, and data. Run options live under Home → Advanced and save automatically.</p>
       </div>
 
       <div className="card">
@@ -44,37 +33,35 @@ export function SettingsView({ theme, toggleTheme }: Props) {
       </div>
 
       <div className="card">
-        <div className="card-title">Run defaults</div>
-        <NumberField
-          label="Parallel encodes"
-          value={workers}
-          min={1}
-          max={8}
-          onChange={(v) => save({ workers: v })}
-        />
-        <p className="muted">
-          2–3 is ideal on a single hardware encoder. More can help pure-CPU encoding on many cores.
-        </p>
+        <div className="card-title">FFmpeg</div>
+        <FfmpegSetup ff={ff} onChange={refreshFf} />
       </div>
 
       <div className="card">
-        <div className="card-title">Bundled FFmpeg</div>
-        <div className="enc-row">
-          <span className={`status-dot ${ff?.present ? "ok" : "bad"}`} />
-          <span>{ff?.present ? "Bundled and ready" : "Not found — using system PATH"}</span>
-        </div>
-        <div className="field">
-          <label>ffmpeg</label>
-          <span className="mono muted" style={{ fontSize: "var(--text-xs)" }}>
-            {ff?.ffmpeg}
-          </span>
-        </div>
-        <div className="field">
-          <label>ffprobe</label>
-          <span className="mono muted" style={{ fontSize: "var(--text-xs)" }}>
-            {ff?.ffprobe}
-          </span>
-        </div>
+        <div className="card-title">Data</div>
+        <p className="muted">
+          The manifest records every file sqz has read or touched. Manage individual entries in the
+          History tab, or wipe the whole database here.
+        </p>
+        <button
+          className="btn danger"
+          onClick={async () => {
+            const ok = await confirm(
+              "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
+              { title: "Clear history", kind: "warning", okLabel: "Clear all", cancelLabel: "Cancel" },
+            );
+            if (!ok) return;
+            await api.clearHistory();
+            setCleared(true);
+          }}
+        >
+          Clear entire history database
+        </button>
+        {cleared && (
+          <p className="muted" style={{ marginTop: "var(--space-2)" }}>
+            History cleared.
+          </p>
+        )}
       </div>
 
       <div className="card">

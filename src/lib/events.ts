@@ -17,7 +17,7 @@ export interface EngineHandlers {
   onFileProgress?: (p: FileProgress) => void;
   onFileEnd?: (p: FileEnd) => void;
   onRecord?: (p: ProcessResult) => void;
-  onRunStart?: () => void;
+  onRunStart?: (total: number) => void;
   onRunDone?: (p: RunSummary) => void;
 }
 
@@ -28,7 +28,7 @@ export async function subscribeEngine(h: EngineHandlers): Promise<UnlistenFn> {
     listen<FileProgress>(EV.fileProgress, (e) => h.onFileProgress?.(e.payload)),
     listen<FileEnd>(EV.fileEnd, (e) => h.onFileEnd?.(e.payload)),
     listen<ProcessResult>(EV.fileRecord, (e) => h.onRecord?.(e.payload)),
-    listen(EV.runStart, () => h.onRunStart?.()),
+    listen<{ total: number }>(EV.runStart, (e) => h.onRunStart?.(e.payload.total)),
     listen<RunSummary>(EV.runDone, (e) => h.onRunDone?.(e.payload)),
   ]);
   return () => unlisteners.forEach((u) => u());

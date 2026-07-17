@@ -21,6 +21,16 @@ export function fileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/**
+ * The path of the file that actually exists on disk now. A re-encoded/normalized
+ * file was rewritten to `.mkv` (its original extension went to the trash), so
+ * point "open" actions at the `.mkv`; anything else keeps its original path.
+ */
+export function currentPath(path: string, encoded: boolean): string {
+  if (!encoded) return path;
+  return path.replace(/\.[^./\\]+$/, ".mkv");
+}
+
 export function fmtDuration(sec: number): string {
   if (!isFinite(sec) || sec < 0) return "—";
   const h = Math.floor(sec / 3600);

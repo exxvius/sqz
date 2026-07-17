@@ -15,7 +15,12 @@ body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
   color: var(--text);
-  background: var(--bg);
+  background:
+    radial-gradient(1100px 600px at 12% -12%, oklch(60% 0.12 200 / 0.16), transparent 55%),
+    radial-gradient(900px 520px at 100% 0%, oklch(62% 0.13 168 / 0.1), transparent 50%),
+    radial-gradient(1000px 700px at 60% 120%, oklch(55% 0.12 260 / 0.1), transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg-2));
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden; /* the app manages its own scroll regions */

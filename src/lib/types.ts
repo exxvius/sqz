@@ -29,6 +29,13 @@ export interface FfStatus {
   present: boolean;
   ffmpeg: string;
   ffprobe: string;
+  source: "none" | "custom" | "managed" | "system";
+}
+
+export interface FfmpegProgress {
+  stage: "download" | "extract" | "done";
+  downloaded: number;
+  total: number;
 }
 
 export interface ScanResult {
@@ -53,16 +60,37 @@ export interface RunConfig {
   dry_run: boolean;
   force: boolean;
   skip_marginal: boolean;
+  marginal_bpp: number;
+  early_abort: boolean;
+  abort_stage1_at: number;
+  abort_bloat_margin: number;
+  abort_check_at: number;
+  abort_late_at: number;
+  abort_late_min_savings: number;
+  retry_failed: boolean;
+  normalize_container: boolean;
 }
 
 export type Outcome =
   | "done"
+  | "normalized"
   | "skipped_efficient"
   | "skipped_marginal"
   | "skipped_no_gain"
   | "failed"
   | "cancelled"
   | "dry_run";
+
+/** Manifest status strings (as stored in the DB). */
+export type Status =
+  | "pending"
+  | "processing"
+  | "done"
+  | "normalized"
+  | "skipped_already_efficient"
+  | "skipped_marginal"
+  | "skipped_no_gain"
+  | "failed";
 
 export interface ProcessResult {
   path: string;
@@ -75,9 +103,8 @@ export interface ProcessResult {
 
 export interface RunSummary {
   done: number;
-  skipped_efficient: number;
-  skipped_marginal: number;
-  skipped_no_gain: number;
+  normalized: number;
+  skipped: number;
   failed: number;
   would: number;
   saved_bytes: number;
@@ -89,17 +116,27 @@ export interface RunSummary {
 
 export interface HistoryRow {
   path: string;
+  status: Status;
+  size: number | null;
   src_codec: string | null;
   height: number | null;
   out_size: number | null;
   saved_bytes: number | null;
+  error: string | null;
   updated_at: number | null;
 }
 
+export interface HistoryFilter {
+  statuses?: string[];
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface History {
-  total_saved: number;
+  total_reclaimed: number;
   counts: Record<string, number>;
-  recent: HistoryRow[];
+  rows: HistoryRow[];
 }
 
 // Event payloads
@@ -113,6 +150,9 @@ export interface FileProgress {
   path: string;
   sec: number;
   out_bytes: number | null;
+  fps: number | null;
+  speed: number | null;
+  bitrate_kbps: number | null;
 }
 export interface FileEnd {
   path: string;

@@ -1,11 +1,9 @@
-/* Design tokens — a disciplined "terminal luxe" system. Theme-aware: dark is the
-   default signal via prefers-color-scheme, and the app's toggle stamps
-   data-theme on <html> to win in both directions. */
+/* Design tokens — a dark, glassy system with gradient hairlines and ambient
+   glow. Theme-aware: dark is the primary look; light stays clean and flat. */
 
 :root {
-  /* Type scale */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter,
-    "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
     "Fira Code", Consolas, monospace;
 
@@ -16,7 +14,6 @@
   --text-xl: 1.5rem;
   --text-2xl: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
 
-  /* Spacing */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -25,70 +22,115 @@
   --space-6: 32px;
   --space-8: 48px;
 
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
 
-  --duration-fast: 130ms;
+  --duration-fast: 120ms;
   --duration: 240ms;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
 
-  /* Semantic status hues (shared across themes) */
-  --ok: oklch(72% 0.17 152);
-  --warn: oklch(80% 0.15 85);
-  --bad: oklch(66% 0.2 27);
-  --info: oklch(72% 0.13 235);
+  --ok: oklch(76% 0.16 158);
+  --warn: oklch(83% 0.15 85);
+  --bad: oklch(68% 0.2 25);
+  --info: oklch(76% 0.12 210);
+  --violet: oklch(74% 0.15 290);
 }
 
-/* ---- Dark (default) ---- */
+/* ---- Dark (primary) ---- */
 :root,
 :root[data-theme="dark"] {
-  --bg: oklch(17% 0.012 260);
-  --bg-elev: oklch(21% 0.014 260);
-  --bg-elev-2: oklch(25% 0.016 260);
-  --surface: oklch(23% 0.015 260 / 0.6);
-  --border: oklch(100% 0 0 / 0.09);
+  --bg: oklch(16% 0.017 245);
+  --bg-2: oklch(13% 0.015 245);
+  --bg-elev: oklch(22% 0.02 245 / 0.55);
+  --bg-elev-2: oklch(26% 0.02 245 / 0.5);
+  --surface: oklch(80% 0.02 245 / 0.06);
+
+  --text: oklch(96% 0.006 240);
+  --text-dim: oklch(74% 0.012 240);
+  --text-faint: oklch(60% 0.014 240);
+
+  --accent: oklch(80% 0.13 195);
+  --accent-2: oklch(72% 0.15 205);
+  --accent-quiet: oklch(80% 0.13 195 / 0.14);
+  --accent-ink: oklch(18% 0.04 220);
+
+  --border: oklch(100% 0 0 / 0.08);
   --border-strong: oklch(100% 0 0 / 0.16);
-  --text: oklch(95% 0.005 260);
-  --text-dim: oklch(72% 0.01 260);
-  --text-faint: oklch(58% 0.012 260);
-  --accent: oklch(78% 0.16 168);
-  --accent-quiet: oklch(78% 0.16 168 / 0.14);
-  --accent-ink: oklch(20% 0.03 168);
-  --shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 12px 32px oklch(0% 0 0 / 0.35);
+
+  /* Glass surfaces */
+  --glass-bg: linear-gradient(
+    160deg,
+    oklch(100% 0 0 / 0.07) 0%,
+    oklch(100% 0 0 / 0.025) 40%,
+    oklch(100% 0 0 / 0.01) 100%
+  );
+  --glass-border: oklch(100% 0 0 / 0.1);
+  --glass-highlight: inset 0 1px 0 oklch(100% 0 0 / 0.09);
+  --glass-shadow: 0 22px 48px -28px oklch(0% 0 0 / 0.8);
+  --blur: blur(16px) saturate(1.2);
+
+  --accent-grad: linear-gradient(180deg, oklch(85% 0.13 195), oklch(68% 0.16 205));
+  --accent-glow: 0 10px 28px -8px oklch(72% 0.15 200 / 0.55),
+    inset 0 1px 0 oklch(100% 0 0 / 0.35);
+
+  --shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 14px 34px -18px oklch(0% 0 0 / 0.55);
+  color-scheme: dark;
 }
 
 /* ---- Light ---- */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: oklch(97.5% 0.004 260);
-    --bg-elev: oklch(100% 0 0);
-    --bg-elev-2: oklch(98% 0.004 260);
-    --surface: oklch(100% 0 0 / 0.7);
+    --bg: oklch(97% 0.005 240);
+    --bg-2: oklch(94% 0.006 240);
+    --bg-elev: oklch(100% 0 0 / 0.7);
+    --bg-elev-2: oklch(100% 0 0 / 0.85);
+    --surface: oklch(20% 0.02 240 / 0.04);
+    --text: oklch(24% 0.02 250);
+    --text-dim: oklch(44% 0.015 250);
+    --text-faint: oklch(56% 0.014 250);
+    --accent: oklch(58% 0.13 200);
+    --accent-2: oklch(52% 0.14 210);
+    --accent-quiet: oklch(58% 0.13 200 / 0.12);
+    --accent-ink: oklch(99% 0.01 200);
     --border: oklch(0% 0 0 / 0.1);
     --border-strong: oklch(0% 0 0 / 0.18);
-    --text: oklch(24% 0.02 260);
-    --text-dim: oklch(44% 0.015 260);
-    --text-faint: oklch(58% 0.012 260);
-    --accent: oklch(56% 0.13 168);
-    --accent-quiet: oklch(56% 0.13 168 / 0.12);
-    --accent-ink: oklch(99% 0.01 168);
-    --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 12px 30px oklch(0% 0 0 / 0.1);
+    --glass-bg: linear-gradient(160deg, oklch(100% 0 0 / 0.85), oklch(100% 0 0 / 0.6));
+    --glass-border: oklch(0% 0 0 / 0.08);
+    --glass-highlight: inset 0 1px 0 oklch(100% 0 0 / 0.7);
+    --glass-shadow: 0 16px 34px -22px oklch(0% 0 0 / 0.22);
+    --blur: blur(14px) saturate(1.1);
+    --accent-grad: linear-gradient(180deg, oklch(64% 0.13 200), oklch(52% 0.14 210));
+    --accent-glow: 0 10px 24px -10px oklch(58% 0.13 205 / 0.5),
+      inset 0 1px 0 oklch(100% 0 0 / 0.4);
+    --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 14px 30px -18px oklch(0% 0 0 / 0.14);
+    color-scheme: light;
   }
 }
 
 :root[data-theme="light"] {
-  --bg: oklch(97.5% 0.004 260);
-  --bg-elev: oklch(100% 0 0);
-  --bg-elev-2: oklch(98% 0.004 260);
-  --surface: oklch(100% 0 0 / 0.7);
+  --bg: oklch(97% 0.005 240);
+  --bg-2: oklch(94% 0.006 240);
+  --bg-elev: oklch(100% 0 0 / 0.7);
+  --bg-elev-2: oklch(100% 0 0 / 0.85);
+  --surface: oklch(20% 0.02 240 / 0.04);
+  --text: oklch(24% 0.02 250);
+  --text-dim: oklch(44% 0.015 250);
+  --text-faint: oklch(56% 0.014 250);
+  --accent: oklch(58% 0.13 200);
+  --accent-2: oklch(52% 0.14 210);
+  --accent-quiet: oklch(58% 0.13 200 / 0.12);
+  --accent-ink: oklch(99% 0.01 200);
   --border: oklch(0% 0 0 / 0.1);
   --border-strong: oklch(0% 0 0 / 0.18);
-  --text: oklch(24% 0.02 260);
-  --text-dim: oklch(44% 0.015 260);
-  --text-faint: oklch(58% 0.012 260);
-  --accent: oklch(56% 0.13 168);
-  --accent-quiet: oklch(56% 0.13 168 / 0.12);
-  --accent-ink: oklch(99% 0.01 168);
-  --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 12px 30px oklch(0% 0 0 / 0.1);
+  --glass-bg: linear-gradient(160deg, oklch(100% 0 0 / 0.85), oklch(100% 0 0 / 0.6));
+  --glass-border: oklch(0% 0 0 / 0.08);
+  --glass-highlight: inset 0 1px 0 oklch(100% 0 0 / 0.7);
+  --glass-shadow: 0 16px 34px -22px oklch(0% 0 0 / 0.22);
+  --blur: blur(14px) saturate(1.1);
+  --accent-grad: linear-gradient(180deg, oklch(64% 0.13 200), oklch(52% 0.14 210));
+  --accent-glow: 0 10px 24px -10px oklch(58% 0.13 205 / 0.5),
+    inset 0 1px 0 oklch(100% 0 0 / 0.4);
+  --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 14px 30px -18px oklch(0% 0 0 / 0.14);
+  color-scheme: light;
 }

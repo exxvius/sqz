@@ -1,52 +1,96 @@
+import { StatusCard } from "./StatusCard";
+import { FolderIcon, PlayIcon } from "./icons";
+import { openFile, revealFile } from "../lib/api";
 import type { LogEntry } from "../lib/store";
-import { humanBytes } from "../lib/format";
-import type { Outcome } from "../lib/types";
+import { currentPath, humanBytes } from "../lib/format";
+import { outcomeMeta } from "../lib/status";
 
-const SYMBOL: Record<Outcome, { sym: string; klass: string }> = {
-  done: { sym: "✓", klass: "done" },
-  skipped_efficient: { sym: "»", klass: "skip" },
-  skipped_marginal: { sym: "~", klass: "skip" },
-  skipped_no_gain: { sym: "=", klass: "skip" },
-  failed: { sym: "✗", klass: "fail" },
-  cancelled: { sym: "•", klass: "skip" },
-  dry_run: { sym: "·", klass: "skip" },
-};
-
-function describe(e: LogEntry): string {
-  switch (e.outcome) {
-    case "done":
-      return `${humanBytes(e.origSize)} → ${humanBytes(e.outSize)} · saved ${humanBytes(
-        e.savedBytes,
-      )}`;
-    case "skipped_efficient":
-      return "already efficient";
-    case "skipped_marginal":
-      return "already lean — skipped";
-    case "skipped_no_gain":
-      return e.message || "no meaningful gain — original kept";
-    case "failed":
-      return e.message || "failed";
-    default:
-      return e.message;
-  }
+interface Props {
+  log: LogEntry[];
+  onRetry: (path: string) => void;
+  onForce: (path: string) => void;
 }
 
-export function EventLog({ log }: { log: LogEntry[] }) {
+export function EventLog({ log, onRetry, onForce }: Props) {
   if (log.length === 0) {
-    return <div className="empty">Events will appear here as files are processed.</div>;
+    return <div className="empty">Events appear here as files are processed.</div>;
   }
+
   return (
-    <div className="log" role="log" aria-live="polite">
+    <div>
       {log.map((e, i) => {
-        const s = SYMBOL[e.outcome];
+        const m = outcomeMeta(e.outcome);
+        const isFail = e.outcome === "failed";
+        const isSkip = e.outcome.startsWith("skipped");
+        const encoded = e.outcome === "done" || e.outcome === "normalized";
+        const filePath = currentPath(e.path, encoded);
+        const meta =
+          e.outcome === "done" || e.outcome === "normalized" ? (
+            <span className="saved-tag">−{humanBytes(e.savedBytes)}</span>
+          ) : null;
+
+        const actions = (
+          <>
+            {!isFail && (
+              <>
+                <button className="mini-btn" onClick={() => openFile(filePath)}>
+                  <PlayIcon /> Open
+                </button>
+                <button className="mini-btn" onClick={() => revealFile(filePath)}>
+                  <FolderIcon /> Folder
+                </button>
+              </>
+            )}
+            {isFail && (
+              <button className="mini-btn" onClick={() => onRetry(e.path)}>
+                ↻ Retry
+              </button>
+            )}
+            {isSkip && (
+              <button className="mini-btn" onClick={() => onForce(e.path)}>
+                ⏵ Force process
+              </button>
+            )}
+          </>
+        );
+
         return (
-          <div className="log-row" key={`${e.path}-${i}`}>
-            <span className={`sym ${s.klass}`}>{s.sym}</span>
-            <span className="lname" title={e.path}>
-              {e.name}
-            </span>
-            <span className="lmsg">{describe(e)}</span>
-          </div>
+          <StatusCard
+            key={`${e.path}-${i}`}
+            tone={m.tone}
+            sym={m.sym}
+            name={e.name}
+            fullPath={e.path}
+            tag={m.label}
+            meta={meta}
+            actions={actions}
+          >
+            <dl className="kv-grid">
+              <dt>path</dt>
+              <dd>{e.path}</dd>
+              {e.origSize != null && (
+                <>
+                  <dt>before</dt>
+                  <dd>{humanBytes(e.origSize)}</dd>
+                </>
+              )}
+              {e.outSize != null && (
+                <>
+                  <dt>after</dt>
+                  <dd>{humanBytes(e.outSize)}</dd>
+                </>
+              )}
+              {(e.outcome === "done" || e.outcome === "normalized") && (
+                <>
+                  <dt>saved</dt>
+                  <dd>{humanBytes(e.savedBytes)}</dd>
+                </>
+              )}
+            </dl>
+
+            {isFail && e.message && <div className="err-box">{e.message}</div>}
+            {!isFail && e.message && <p className="muted">{e.message}</p>}
+          </StatusCard>
         );
       })}
     </div>

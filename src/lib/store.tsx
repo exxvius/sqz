@@ -12,7 +12,9 @@ import {
 } from "react";
 import { api } from "./api";
 import { subscribeEngine } from "./events";
-import type { ProcessResult, RunConfig, RunSummary } from "./types";
+import type { FileProgress, ProcessResult, RunConfig, RunSummary } from "./types";
+
+const PROJECTION_HISTORY = 24;
 
 export interface ActiveFile {
   path: string;
@@ -21,6 +23,11 @@ export interface ActiveFile {
   srcSize: number;
   sec: number;
   outBytes: number | null;
+  fps: number | null;
+  speed: number | null;
+  bitrateKbps: number | null;
+  /** Recent projected final sizes, for the trend indicator. */
+  projections: number[];
 }
 
 export interface LogEntry {
@@ -38,12 +45,14 @@ interface State {
   running: boolean;
   paused: boolean;
   minSavings: number;
+  queueTotal: number;
   active: Record<string, ActiveFile>;
   log: LogEntry[];
   summary: RunSummary | null;
   session: {
     saved: number;
     done: number;
+    normalized: number;
     failed: number;
     skipped: number;
     processed: number;
@@ -53,23 +62,33 @@ interface State {
 type Action =
   | { type: "SET_RUNNING"; running: boolean }
   | { type: "SET_PAUSED"; paused: boolean }
-  | { type: "RUN_START"; minSavings: number }
+  | { type: "RUN_START"; minSavings: number; total: number }
   | { type: "FILE_START"; path: string; name: string; duration: number | null; srcSize: number }
-  | { type: "FILE_PROGRESS"; path: string; sec: number; outBytes: number | null }
+  | { type: "FILE_PROGRESS"; p: FileProgress }
   | { type: "FILE_END"; path: string }
   | { type: "RECORD"; result: ProcessResult }
   | { type: "RUN_DONE"; summary: RunSummary };
 
-const LOG_CAP = 500;
+const LOG_CAP = 1000;
+
+const emptySession = () => ({
+  saved: 0,
+  done: 0,
+  normalized: 0,
+  failed: 0,
+  skipped: 0,
+  processed: 0,
+});
 
 const initial: State = {
   running: false,
   paused: false,
   minSavings: 0.1,
+  queueTotal: 0,
   active: {},
   log: [],
   summary: null,
-  session: { saved: 0, done: 0, failed: 0, skipped: 0, processed: 0 },
+  session: emptySession(),
 };
 
 function nameOf(path: string): string {
@@ -91,7 +110,8 @@ function reducer(state: State, action: Action): State {
         summary: null,
         active: {},
         minSavings: action.minSavings,
-        session: { saved: 0, done: 0, failed: 0, skipped: 0, processed: 0 },
+        queueTotal: action.total,
+        session: emptySession(),
       };
     case "FILE_START":
       return {
@@ -105,17 +125,37 @@ function reducer(state: State, action: Action): State {
             srcSize: action.srcSize,
             sec: 0,
             outBytes: null,
+            fps: null,
+            speed: null,
+            bitrateKbps: null,
+            projections: [],
           },
         },
       };
     case "FILE_PROGRESS": {
-      const f = state.active[action.path];
+      const f = state.active[action.p.path];
       if (!f) return state;
+      const projections = f.projections.slice();
+      if (action.p.out_bytes && f.duration && f.duration > 0) {
+        const frac = action.p.sec / f.duration;
+        if (frac > 0) {
+          projections.push(action.p.out_bytes / frac);
+          if (projections.length > PROJECTION_HISTORY) projections.shift();
+        }
+      }
       return {
         ...state,
         active: {
           ...state.active,
-          [action.path]: { ...f, sec: action.sec, outBytes: action.outBytes },
+          [action.p.path]: {
+            ...f,
+            sec: action.p.sec,
+            outBytes: action.p.out_bytes,
+            fps: action.p.fps,
+            speed: action.p.speed,
+            bitrateKbps: action.p.bitrate_kbps,
+            projections,
+          },
         },
       };
     }
@@ -138,10 +178,13 @@ function reducer(state: State, action: Action): State {
         at: Date.now(),
       };
       const session = { ...state.session };
-      session.processed += 1;
+      if (r.outcome !== "cancelled") session.processed += 1;
       if (r.outcome === "done") {
         session.done += 1;
         session.saved += r.saved_bytes;
+      } else if (r.outcome === "normalized") {
+        session.normalized += 1;
+        if (r.saved_bytes > 0) session.saved += r.saved_bytes;
       } else if (r.outcome === "failed") {
         session.failed += 1;
       } else if (r.outcome.startsWith("skipped")) {
@@ -161,6 +204,9 @@ interface StoreValue extends State {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
+  abortFile: (path: string) => Promise<void>;
+  retryFile: (path: string) => Promise<void>;
+  forceFile: (path: string) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -170,10 +216,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pendingMinSavings = useRef(0.1);
 
   useEffect(() => {
+    // Guard against React StrictMode's mount/cleanup/mount: if the async
+    // subscription resolves after this effect was already cleaned up, unlisten
+    // immediately so we never end up with two live listeners (duplicate events).
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     subscribeEngine({
-      onRunStart: () =>
-        dispatch({ type: "RUN_START", minSavings: pendingMinSavings.current }),
+      onRunStart: (total) =>
+        dispatch({ type: "RUN_START", minSavings: pendingMinSavings.current, total }),
       onFileStart: (p) =>
         dispatch({
           type: "FILE_START",
@@ -182,17 +232,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           duration: p.duration,
           srcSize: p.src_size,
         }),
-      onFileProgress: (p) =>
-        dispatch({ type: "FILE_PROGRESS", path: p.path, sec: p.sec, outBytes: p.out_bytes }),
+      onFileProgress: (p) => dispatch({ type: "FILE_PROGRESS", p }),
       onFileEnd: (p) => dispatch({ type: "FILE_END", path: p.path }),
       onRecord: (r) => dispatch({ type: "RECORD", result: r }),
       onRunDone: (s) => dispatch({ type: "RUN_DONE", summary: s }),
-    }).then((u) => (unlisten = u));
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
 
-    // Reconcile in case a run is already active (e.g. window reopened).
     api.isRunning().then((running) => dispatch({ type: "SET_RUNNING", running }));
 
-    return () => unlisten?.();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   const value = useMemo<StoreValue>(
@@ -213,6 +267,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancel: async () => {
         await api.cancelRun();
       },
+      abortFile: (path) => api.abortFile(path),
+      retryFile: (path) => api.retryFile(path),
+      forceFile: (path) => api.forceFile(path),
     }),
     [state],
   );

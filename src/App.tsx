@@ -1,22 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardView } from "./views/DashboardView";
 import { HistoryView } from "./views/HistoryView";
 import { HomeView } from "./views/HomeView";
 import { Onboarding } from "./views/Onboarding";
 import { SettingsView } from "./views/SettingsView";
 import { api } from "./lib/api";
-import { applyDefaults, defaultConfig, type PersistedDefaults } from "./lib/config";
+import { defaultConfig, fromPersisted, persistable } from "./lib/config";
+import { HistoryIcon, HomeIcon, LiveIcon, Logo, SettingsIcon } from "./components/icons";
 import { StoreProvider, useStore } from "./lib/store";
 import { useTheme } from "./lib/theme";
 import type { FfStatus, RunConfig } from "./lib/types";
+import type { ComponentType } from "react";
 
 type View = "home" | "dashboard" | "history" | "settings";
 
-const NAV: { id: View; label: string; glyph: string }[] = [
-  { id: "home", label: "Home", glyph: "▚" },
-  { id: "dashboard", label: "Live", glyph: "◈" },
-  { id: "history", label: "History", glyph: "≣" },
-  { id: "settings", label: "Settings", glyph: "⚙" },
+const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: "home", label: "Home", icon: HomeIcon },
+  { id: "dashboard", label: "Live", icon: LiveIcon },
+  { id: "history", label: "History", icon: HistoryIcon },
+  { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 function Shell() {
@@ -24,18 +26,33 @@ function Shell() {
   const [theme, toggleTheme] = useTheme();
   const [view, setView] = useState<View>("home");
   const [config, setConfig] = useState<RunConfig>(defaultConfig);
-  const [ff, setFf] = useState<FfStatus | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem("sqz-onboarded"),
   );
 
-  useEffect(() => {
+  const loaded = useRef(false);
+  const [ff, setFf] = useState<FfStatus | null>(null);
+  const refreshFf = useCallback(() => {
     api.ffmpegStatus().then(setFf);
-    // Seed the config form with the user's saved defaults.
-    api.getSettings().then((saved) => {
-      setConfig((c) => applyDefaults(c, saved as Partial<PersistedDefaults>));
-    });
   }, []);
+
+  useEffect(() => {
+    refreshFf();
+    // Restore all persisted settings (everything except the input list).
+    api.getSettings().then((saved) => {
+      setConfig((c) => ({ ...fromPersisted(saved), inputs: c.inputs }));
+      loaded.current = true;
+    });
+  }, [refreshFf]);
+
+  // Persist settings (debounced) whenever the config changes, once loaded.
+  useEffect(() => {
+    if (!loaded.current) return;
+    const id = setTimeout(() => {
+      api.saveSettings(persistable(config)).catch(() => {});
+    }, 400);
+    return () => clearTimeout(id);
+  }, [config]);
 
   const dismissOnboarding = () => {
     localStorage.setItem("sqz-onboarded", "1");
@@ -46,50 +63,56 @@ function Shell() {
     switch (view) {
       case "home":
         return (
-          <HomeView config={config} setConfig={setConfig} goDashboard={() => setView("dashboard")} />
+          <HomeView
+            config={config}
+            setConfig={setConfig}
+            goDashboard={() => setView("dashboard")}
+            ff={ff}
+            refreshFf={refreshFf}
+            goSettings={() => setView("settings")}
+          />
         );
       case "dashboard":
         return <DashboardView />;
       case "history":
         return <HistoryView />;
       case "settings":
-        return <SettingsView theme={theme} toggleTheme={toggleTheme} />;
+        return <SettingsView theme={theme} toggleTheme={toggleTheme} ff={ff} refreshFf={refreshFf} />;
     }
-  }, [view, config, theme, toggleTheme]);
+  }, [view, config, theme, toggleTheme, ff, refreshFf]);
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <h1>sqz</h1>
-          <span className="dot" />
+          <Logo size={30} />
+          <span className="wordmark">sqz</span>
         </div>
 
         <nav aria-label="Main">
-          {NAV.map((n) => (
-            <button
-              key={n.id}
-              className="nav-item"
-              aria-current={view === n.id}
-              onClick={() => setView(n.id)}
-            >
-              <span className="glyph">{n.glyph}</span>
-              <span className="grow">{n.label}</span>
-              {n.id === "dashboard" && store.running && (
-                <span className="status-dot ok" title="Run in progress" />
-              )}
-            </button>
-          ))}
+          {NAV.map((n) => {
+            const Icon = n.icon;
+            const processing = n.id === "dashboard" && store.running;
+            return (
+              <button
+                key={n.id}
+                className={`nav-item${processing ? " processing" : ""}`}
+                aria-current={view === n.id}
+                onClick={() => setView(n.id)}
+              >
+                <span className="glyph">
+                  <Icon size={18} />
+                </span>
+                <span className="grow">{n.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-foot">
           <button className="theme-toggle" onClick={toggleTheme}>
             {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
           </button>
-          <div className="ff-badge">
-            <span className={`status-dot ${ff?.present ? "ok" : "bad"}`} />
-            {ff?.present ? "FFmpeg bundled" : "FFmpeg via PATH"}
-          </div>
         </div>
       </aside>
 

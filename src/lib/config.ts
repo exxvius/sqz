@@ -18,14 +18,31 @@ export const defaultConfig = (): RunConfig => ({
   dry_run: false,
   force: false,
   skip_marginal: false,
+  marginal_bpp: 0.05,
+  early_abort: true,
+  abort_stage1_at: 0.05,
+  abort_bloat_margin: 0.25,
+  abort_check_at: 0.1,
+  abort_late_at: 0.75,
+  abort_late_min_savings: 0.03,
+  retry_failed: true,
+  normalize_container: false,
 });
 
-/** Persisted settings are a subset of RunConfig used as form defaults. */
-export type PersistedDefaults = Pick<
-  RunConfig,
-  "codec" | "quality" | "workers" | "min_savings" | "max_height" | "on_success" | "skip_marginal"
->;
+/** Everything except the transient input list is persisted between sessions. */
+export function persistable(config: RunConfig): Record<string, unknown> {
+  const { inputs: _inputs, ...rest } = config;
+  return rest;
+}
 
-export function applyDefaults(base: RunConfig, saved: Partial<PersistedDefaults>): RunConfig {
-  return { ...base, ...saved };
+/** Merge persisted settings over the defaults, ignoring stale/unknown keys. */
+export function fromPersisted(saved: Record<string, unknown>): RunConfig {
+  const base = defaultConfig();
+  const merged: Record<string, unknown> = { ...base };
+  for (const key of Object.keys(base)) {
+    if (key !== "inputs" && key in saved && saved[key] != null) {
+      merged[key] = saved[key];
+    }
+  }
+  return merged as unknown as RunConfig;
 }

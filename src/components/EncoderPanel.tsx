@@ -1,25 +1,41 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import { api } from "../lib/api";
-import type { Codec, Detection, Encoder } from "../lib/types";
+import type { Codec, Detection, EncoderFamily } from "../lib/types";
 
 interface Props {
   codec: Codec;
   encoderOverride: string | null;
   onOverride: (name: string | null) => void;
+  onCodec: (c: Codec) => void;
 }
 
-const familyPill = (e: Encoder) =>
-  e.family === "software" ? "pill cpu" : "pill hw";
+const FAMILY_LABEL: Record<EncoderFamily, string> = {
+  nvenc: "NVIDIA (NVENC)",
+  amf: "AMD (AMF)",
+  qsv: "Intel (QSV)",
+  videotoolbox: "Apple (VideoToolbox)",
+  software: "CPU",
+};
 
-export function EncoderPanel({ codec, encoderOverride, onOverride }: Props) {
+const CODEC_LABEL: Record<Codec, string> = {
+  av1: "AV1",
+  hevc: "HEVC",
+  h264: "H.264",
+};
+
+export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Props) {
   const [detection, setDetection] = useState<Detection | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const detect = () => {
     setLoading(true);
+    setFailed(false);
     api
       .detectEncoders()
       .then(setDetection)
+      .catch(() => setFailed(true))
       .finally(() => setLoading(false));
   };
 
@@ -27,6 +43,18 @@ export function EncoderPanel({ codec, encoderOverride, onOverride }: Props) {
 
   const support = detection?.codecs.find((c) => c.codec === codec);
   const usable = support?.usable ?? [];
+  const hwForCodec = usable.find((e) => e.family !== "software");
+
+  // GPU vendors detected across any codec (for the "your hardware" summary).
+  const vendors = new Set<EncoderFamily>();
+  detection?.codecs.forEach((c) =>
+    c.usable.forEach((e) => e.family !== "software" && vendors.add(e.family)),
+  );
+
+  // Codecs that have a hardware encoder on this machine (for the switch tip).
+  const hwCodecs = (detection?.codecs ?? [])
+    .filter((c) => c.usable.some((e) => e.family !== "software") && c.codec !== codec)
+    .map((c) => c.codec);
 
   return (
     <div className="card">
@@ -43,46 +71,81 @@ export function EncoderPanel({ codec, encoderOverride, onOverride }: Props) {
         <p className="muted" style={{ marginTop: "var(--space-4)" }}>
           Probing your GPU and CPU encoders…
         </p>
+      ) : failed ? (
+        <p className="muted" style={{ marginTop: "var(--space-4)" }}>
+          Couldn't probe encoders. <button className="link-btn" onClick={detect}>Try again</button>.
+        </p>
       ) : (
         <>
-          <p className="muted" style={{ margin: "var(--space-3) 0 var(--space-4)" }}>
-            {detection?.has_hardware
-              ? "Hardware acceleration available — encoding will be fast."
-              : "No hardware encoder validated. Falling back to CPU (slower, still works)."}
-          </p>
-
-          <div className="field">
-            <label htmlFor="enc-sel">Encoder for {codec.toUpperCase()}</label>
-            <select
-              id="enc-sel"
-              value={encoderOverride ?? "auto"}
-              onChange={(e) => onOverride(e.target.value === "auto" ? null : e.target.value)}
-            >
-              <option value="auto">Auto (best available)</option>
-              {usable.map((e) => (
-                <option key={e.name} value={e.name}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
+          <div className="hw-summary">
+            <span className="muted">Detected:</span>
+            {vendors.size > 0 ? (
+              [...vendors].map((f) => (
+                <span key={f} className="pill hw">
+                  {FAMILY_LABEL[f]}
+                </span>
+              ))
+            ) : (
+              <span className="pill cpu">No GPU encoder — CPU only</span>
+            )}
           </div>
 
-          <div className="enc-grid" style={{ marginTop: "var(--space-3)" }}>
-            {usable.length === 0 ? (
-              <span className="muted">No usable {codec.toUpperCase()} encoder found.</span>
-            ) : (
-              usable.map((e) => (
-                <div className="enc-row" key={e.name}>
-                  <span className="fam mono">{e.name}</span>
-                  <span className={familyPill(e)}>
-                    {e.family === "software" ? "CPU" : "hardware"}
+          <div className="codec-matrix">
+            {(detection?.codecs ?? []).map((c) => {
+              const hw = c.usable.find((e) => e.family !== "software");
+              return (
+                <button
+                  key={c.codec}
+                  className={`matrix-cell${c.codec === codec ? " active" : ""}`}
+                  onClick={() => onCodec(c.codec)}
+                >
+                  <span className="mc-codec">{CODEC_LABEL[c.codec]}</span>
+                  <span className={`mc-badge ${hw ? "hw" : "cpu"}`}>
+                    {hw ? FAMILY_LABEL[hw.family].replace(/ \(.*\)/, "") : "CPU"}
                   </span>
-                  {support?.selected?.name === e.name && !encoderOverride && (
-                    <span className="pill">auto-selected</span>
-                  )}
-                </div>
-              ))
-            )}
+                </button>
+              );
+            })}
+          </div>
+
+          {hwForCodec ? (
+            <p className="hw-note ok">
+              Using <strong>{FAMILY_LABEL[hwForCodec.family]}</strong> hardware acceleration for{" "}
+              {CODEC_LABEL[codec]}.
+            </p>
+          ) : (
+            <p className="hw-note warn">
+              Your GPU doesn't hardware-encode {CODEC_LABEL[codec]}, so it will use your CPU
+              (slower, still safe).
+              {hwCodecs.length > 0 && (
+                <>
+                  {" "}
+                  For hardware speed:{" "}
+                  {hwCodecs.map((c) => (
+                    <button key={c} className="link-btn" onClick={() => onCodec(c)}>
+                      use {CODEC_LABEL[c]}
+                    </button>
+                  ))}
+                  .
+                </>
+              )}
+            </p>
+          )}
+
+          <div className="field">
+            <label>Encoder</label>
+            <Select
+              ariaLabel="Encoder"
+              value={encoderOverride ?? "auto"}
+              onChange={(v) => onOverride(v === "auto" ? null : v)}
+              options={[
+                { value: "auto", label: "Auto (best available)" },
+                ...usable.map((e) => ({
+                  value: e.name,
+                  label: `${e.name} · ${e.family === "software" ? "CPU" : "hardware"}`,
+                })),
+              ]}
+            />
           </div>
         </>
       )}
