@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # generate_context! needs the built frontend (dist/) and icons to exist at
+      # compile time, so produce them before touching Cargo.
+      - run: npm run build
+      - run: npm run tauri icon src-tauri/icons/sqz.svg
+
+      - name: Typecheck web
+        run: npx tsc --noEmit
+
+      # Style gates are informational for now so a clean checkout stays green;
+      # tighten to hard failures once the team adopts a formatting baseline.
+      - name: rustfmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+        continue-on-error: true
+
+      - name: clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets
+        continue-on-error: true
+
+      - name: Test the engine
+        working-directory: src-tauri
+        run: cargo test

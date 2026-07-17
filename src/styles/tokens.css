@@ -1,0 +1,94 @@
+/* Design tokens — a disciplined "terminal luxe" system. Theme-aware: dark is the
+   default signal via prefers-color-scheme, and the app's toggle stamps
+   data-theme on <html> to win in both directions. */
+
+:root {
+  /* Type scale */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
+    "Fira Code", Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --duration-fast: 130ms;
+  --duration: 240ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Semantic status hues (shared across themes) */
+  --ok: oklch(72% 0.17 152);
+  --warn: oklch(80% 0.15 85);
+  --bad: oklch(66% 0.2 27);
+  --info: oklch(72% 0.13 235);
+}
+
+/* ---- Dark (default) ---- */
+:root,
+:root[data-theme="dark"] {
+  --bg: oklch(17% 0.012 260);
+  --bg-elev: oklch(21% 0.014 260);
+  --bg-elev-2: oklch(25% 0.016 260);
+  --surface: oklch(23% 0.015 260 / 0.6);
+  --border: oklch(100% 0 0 / 0.09);
+  --border-strong: oklch(100% 0 0 / 0.16);
+  --text: oklch(95% 0.005 260);
+  --text-dim: oklch(72% 0.01 260);
+  --text-faint: oklch(58% 0.012 260);
+  --accent: oklch(78% 0.16 168);
+  --accent-quiet: oklch(78% 0.16 168 / 0.14);
+  --accent-ink: oklch(20% 0.03 168);
+  --shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 12px 32px oklch(0% 0 0 / 0.35);
+}
+
+/* ---- Light ---- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: oklch(97.5% 0.004 260);
+    --bg-elev: oklch(100% 0 0);
+    --bg-elev-2: oklch(98% 0.004 260);
+    --surface: oklch(100% 0 0 / 0.7);
+    --border: oklch(0% 0 0 / 0.1);
+    --border-strong: oklch(0% 0 0 / 0.18);
+    --text: oklch(24% 0.02 260);
+    --text-dim: oklch(44% 0.015 260);
+    --text-faint: oklch(58% 0.012 260);
+    --accent: oklch(56% 0.13 168);
+    --accent-quiet: oklch(56% 0.13 168 / 0.12);
+    --accent-ink: oklch(99% 0.01 168);
+    --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 12px 30px oklch(0% 0 0 / 0.1);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: oklch(97.5% 0.004 260);
+  --bg-elev: oklch(100% 0 0);
+  --bg-elev-2: oklch(98% 0.004 260);
+  --surface: oklch(100% 0 0 / 0.7);
+  --border: oklch(0% 0 0 / 0.1);
+  --border-strong: oklch(0% 0 0 / 0.18);
+  --text: oklch(24% 0.02 260);
+  --text-dim: oklch(44% 0.015 260);
+  --text-faint: oklch(58% 0.012 260);
+  --accent: oklch(56% 0.13 168);
+  --accent-quiet: oklch(56% 0.13 168 / 0.12);
+  --accent-ink: oklch(99% 0.01 168);
+  --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 12px 30px oklch(0% 0 0 / 0.1);
+}

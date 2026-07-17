@@ -1,0 +1,33 @@
+# --- Rust / Tauri ---
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/icons/android/
+/src-tauri/icons/ios/
+**/*.rs.bk
+
+# --- Node / web ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# --- Bundled ffmpeg sidecars (downloaded per-platform, not committed) ---
+# The binaries are fetched by scripts/fetch-ffmpeg.* or CI. See binaries/README.md.
+/src-tauri/binaries/ffmpeg-*
+/src-tauri/binaries/ffprobe-*
+!/src-tauri/binaries/README.md
+
+# --- Runtime state (never commit a user's manifest/logs) ---
+*.db
+*.db-shm
+*.db-wal
+*.log
+sqz.lock
+
+# --- Editor / OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

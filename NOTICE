@@ -1,0 +1,25 @@
+sqz
+Copyright (c) 2026 sqz contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+--------------------------------------------------------------------------------
+FFmpeg
+--------------------------------------------------------------------------------
+
+sqz uses FFmpeg (ffmpeg, ffprobe) to inspect and re-encode media. It does NOT
+bundle or redistribute FFmpeg. Instead, at the user's explicit request, the app
+downloads a prebuilt FFmpeg into its own data folder, or uses FFmpeg binaries the
+user already has on their system.
+
+FFmpeg is a separate work with its own license. The prebuilt binaries sqz can
+download are GPL-licensed builds. Those binaries are governed by their own
+license (GPL); sqz's own source code remains under the MIT License.
+
+  - FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
+  - FFmpeg project & source: https://ffmpeg.org/  ·  https://git.ffmpeg.org/ffmpeg.git
+  - Windows/Linux builds sqz downloads: https://github.com/BtbN/FFmpeg-Builds
+  - macOS builds sqz downloads: https://evermeet.cx/ffmpeg/
+  - GPL text: https://www.gnu.org/licenses/gpl-3.0.html
+
+sqz is not affiliated with the FFmpeg project.
