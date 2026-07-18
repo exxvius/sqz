@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::abort::AbortProjection;
-use super::config::Config;
+use super::config::{AudioMode, Config, Container};
 use super::encoders::{Encoder, EncoderFamily};
 use super::probe::MediaInfo;
 use super::util::command_no_window;
@@ -94,12 +94,31 @@ fn color_args(info: &MediaInfo) -> Vec<String> {
     a
 }
 
-/// Copy subtitles into MKV, converting mp4 timed-text which MKV can't copy.
-fn subtitle_args(info: &MediaInfo) -> [&'static str; 2] {
-    if info.has_text_mp4_subs() {
-        ["-c:s", "srt"]
-    } else {
-        ["-c:s", "copy"]
+/// Subtitle codec flags for the target container. MKV copies subs (converting
+/// mp4 timed-text to SRT, which MKV can't copy); MP4 needs `mov_text` for text
+/// subs (bitmap subs it can't hold will fail the encode loudly, keeping the
+/// original — never silently dropped).
+fn subtitle_args(cfg: &Config, info: &MediaInfo) -> [&'static str; 2] {
+    match cfg.container {
+        Container::Mkv => {
+            if info.has_text_mp4_subs() {
+                ["-c:s", "srt"]
+            } else {
+                ["-c:s", "copy"]
+            }
+        }
+        Container::Mp4 => ["-c:s", "mov_text"],
+    }
+}
+
+/// Audio codec flags for the run's effective audio mode (empty = leave the
+/// container-default stream copy in place).
+fn audio_args(cfg: &Config) -> Vec<String> {
+    let bitrate = format!("{}k", cfg.audio_bitrate_kbps.max(1));
+    match cfg.effective_audio_mode() {
+        AudioMode::Copy => Vec::new(),
+        AudioMode::Opus => vec!["-c:a".into(), "libopus".into(), "-b:a".into(), bitrate],
+        AudioMode::Aac => vec!["-c:a".into(), "aac".into(), "-b:a".into(), bitrate],
     }
 }
 
@@ -164,15 +183,22 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     a.push(info.path.to_string_lossy().into_owned());
 
     // Map real streams only (all optional): video EXCLUDING attached-pic cover
-    // art, audio, subtitles, attachments (fonts); copy metadata + chapters.
-    // Data/timecode streams are intentionally dropped (MKV can't mux them).
+    // art, audio, subtitles; copy metadata + chapters. Attachments (fonts) are
+    // mapped for MKV only — MP4 can't hold them. Data/timecode streams are
+    // intentionally dropped (neither container muxes them cleanly).
     a.extend(
-        [
-            "-map", "0:V?", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?",
-            "-map_metadata", "0", "-map_chapters", "0",
-        ]
-        .iter()
-        .map(|s| s.to_string()),
+        ["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    if cfg.container == Container::Mkv {
+        a.push("-map".into());
+        a.push("0:t?".into());
+    }
+    a.extend(
+        ["-map_metadata", "0", "-map_chapters", "0"]
+            .iter()
+            .map(|s| s.to_string()),
     );
 
     if let Some(h) = info.height {
@@ -205,17 +231,23 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     }
     a.extend(color_args(info));
 
-    a.extend(subtitle_args(info).iter().map(|s| s.to_string()));
+    a.extend(audio_args(cfg));
+    a.extend(subtitle_args(cfg, info).iter().map(|s| s.to_string()));
 
     a.push("-max_muxing_queue_size".into());
     a.push("1024".into());
+    if cfg.container == Container::Mp4 {
+        // Move the moov atom to the front so the file is streamable/seekable.
+        a.push("-movflags".into());
+        a.push("+faststart".into());
+    }
     a.push(out_path.to_string_lossy().into_owned());
     a
 }
 
-/// Build args to remux a source into the target MKV container without
-/// re-encoding (stream copy). Used to normalize a library to one format.
-pub fn build_remux_args(info: &MediaInfo, out_path: &Path) -> Vec<String> {
+/// Build args to remux a source into the target container without re-encoding
+/// (stream copy). Used to normalize a library to one format.
+pub fn build_remux_args(cfg: &Config, info: &MediaInfo, out_path: &Path) -> Vec<String> {
     let mut a: Vec<String> = vec![
         "-hide_banner".into(),
         "-nostdin".into(),
@@ -227,16 +259,26 @@ pub fn build_remux_args(info: &MediaInfo, out_path: &Path) -> Vec<String> {
         info.path.to_string_lossy().into_owned(),
     ];
     a.extend(
-        [
-            "-map", "0:V?", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?",
-            "-map_metadata", "0", "-map_chapters", "0", "-c", "copy",
-        ]
-        .iter()
-        .map(|s| s.to_string()),
+        ["-map", "0:V?", "-map", "0:a?", "-map", "0:s?"]
+            .iter()
+            .map(|s| s.to_string()),
     );
-    a.extend(subtitle_args(info).iter().map(|s| s.to_string()));
+    if cfg.container == Container::Mkv {
+        a.push("-map".into());
+        a.push("0:t?".into());
+    }
+    a.extend(
+        ["-map_metadata", "0", "-map_chapters", "0", "-c", "copy"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    a.extend(subtitle_args(cfg, info).iter().map(|s| s.to_string()));
     a.push("-max_muxing_queue_size".into());
     a.push("1024".into());
+    if cfg.container == Container::Mp4 {
+        a.push("-movflags".into());
+        a.push("+faststart".into());
+    }
     a.push(out_path.to_string_lossy().into_owned());
     a
 }
@@ -387,7 +429,7 @@ pub fn run_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::config::{Codec, Config};
+    use super::super::config::{AudioMode, Codec, Config, Container};
     use super::super::encoders::Encoder;
     use std::path::PathBuf;
 
@@ -407,6 +449,7 @@ mod tests {
             color_transfer: None,
             color_space: None,
             color_range: None,
+            dolby_vision: false,
         }
     }
 
@@ -496,6 +539,42 @@ mod tests {
         let a = build_args(&cfg, &m, &e, Path::new("o.mkv")).join(" ");
         assert!(!a.contains("-color_primaries"));
         assert!(a.contains("-color_trc bt709"));
+    }
+
+    #[test]
+    fn mp4_container_uses_movtext_faststart_and_drops_attachments() {
+        let cfg = Config { container: Container::Mp4, ..Config::default() };
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mp4")).join(" ");
+        assert!(a.contains("-c:s mov_text"));
+        assert!(a.contains("-movflags +faststart"));
+        assert!(!a.contains("0:t?")); // no attachment mapping in MP4
+    }
+
+    #[test]
+    fn audio_transcode_emits_codec_and_bitrate() {
+        let cfg = Config { audio_mode: AudioMode::Opus, audio_bitrate_kbps: 160, ..Config::default() };
+        let e = enc("libx265", EncoderFamily::Software);
+        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-c:a libopus"));
+        assert!(a.contains("-b:a 160k"));
+    }
+
+    #[test]
+    fn mp4_opus_downgrades_to_aac() {
+        let cfg = Config { container: Container::Mp4, audio_mode: AudioMode::Opus, ..Config::default() };
+        let e = enc("h264_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mp4")).join(" ");
+        assert!(a.contains("-c:a aac"));
+        assert!(!a.contains("libopus"));
+    }
+
+    #[test]
+    fn copy_audio_adds_no_audio_codec_flag() {
+        let cfg = Config::default();
+        let e = enc("libx265", EncoderFamily::Software);
+        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-c:a"));
     }
 
     #[test]

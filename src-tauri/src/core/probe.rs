@@ -47,6 +47,9 @@ pub struct MediaInfo {
     pub color_transfer: Option<String>,
     pub color_space: Option<String>,
     pub color_range: Option<String>,
+    /// Dolby Vision present (a DOVI configuration record / DV codec tag). Its RPU
+    /// enhancement layer is easily dropped on re-encode, so we can skip such files.
+    pub dolby_vision: bool,
 }
 
 impl MediaInfo {
@@ -105,6 +108,31 @@ fn to_f64(v: Option<&serde_json::Value>) -> Option<f64> {
         return Some(n);
     }
     v.as_str().and_then(|s| s.trim().parse::<f64>().ok())
+}
+
+/// Detect Dolby Vision on a video stream: either a DOVI configuration record in
+/// its side-data list, or a DV codec tag (dvhe/dvh1/dav1/dvav).
+fn detect_dolby_vision(video: &serde_json::Value) -> bool {
+    let tag_is_dv = video
+        .get("codec_tag_string")
+        .and_then(serde_json::Value::as_str)
+        .map(|t| matches!(t, "dvhe" | "dvh1" | "dav1" | "dvav"))
+        .unwrap_or(false);
+    if tag_is_dv {
+        return true;
+    }
+    video
+        .get("side_data_list")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| {
+            list.iter().any(|sd| {
+                sd.get("side_data_type")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|t| t.to_ascii_lowercase().contains("dovi") || t.to_ascii_lowercase().contains("dolby vision"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// A color-characteristic string, or `None` when ffprobe reports it as absent or
@@ -223,6 +251,7 @@ pub fn probe(ffprobe: &Path, path: &Path, timeout: Duration) -> Result<MediaInfo
         color_transfer: color_field(video.get("color_transfer")),
         color_space: color_field(video.get("color_space")),
         color_range: color_field(video.get("color_range")),
+        dolby_vision: detect_dolby_vision(video),
     })
 }
 
@@ -275,6 +304,7 @@ mod tests {
             color_transfer: None,
             color_space: None,
             color_range: None,
+            dolby_vision: false,
         }
     }
 

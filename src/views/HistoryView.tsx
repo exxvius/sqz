@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, message, save } from "@tauri-apps/plugin-dialog";
 import { StatusCard } from "../components/StatusCard";
 import { FolderIcon, PlayIcon } from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
@@ -81,6 +81,37 @@ export function HistoryView() {
     refresh();
   };
 
+  const restore = async (path: string) => {
+    const ok = await confirm(
+      "Restore the original and send the encoded file to the Recycle Bin? This only works when the original was kept in a holding folder.",
+      { title: "Restore original", okLabel: "Restore", cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+    try {
+      await api.restoreOriginal(path);
+      refresh();
+    } catch (e) {
+      await message(e instanceof Error ? e.message : "Restore failed.", {
+        title: "Restore failed",
+        kind: "error",
+      });
+    }
+  };
+
+  const exportHistory = async () => {
+    const dest = await save({
+      defaultPath: "sqz-history.csv",
+      filters: [
+        { name: "CSV", extensions: ["csv"] },
+        { name: "JSON", extensions: ["json"] },
+      ],
+    });
+    if (!dest) return;
+    const format = dest.toLowerCase().endsWith(".json") ? "json" : "csv";
+    const n = await api.exportHistory(dest, format, filter());
+    await message(`Exported ${n} row${n === 1 ? "" : "s"}.`, { title: "Export complete" });
+  };
+
   const counts = history?.counts ?? {};
 
   return (
@@ -128,6 +159,9 @@ export function HistoryView() {
             {history ? `${history.rows.length} shown` : "loading…"}
           </span>
           <div className="grow" />
+          <button className="mini-btn" onClick={exportHistory}>
+            ⭳ Export
+          </button>
           <button className="mini-btn danger" onClick={removeFiltered}>
             Remove shown
           </button>
@@ -165,6 +199,11 @@ export function HistoryView() {
                 {forceable(r.status) && (
                   <button className="mini-btn" onClick={() => act(api.forceFile(r.path))}>
                     ⏵ Force process
+                  </button>
+                )}
+                {encoded && (
+                  <button className="mini-btn" onClick={() => restore(r.path)}>
+                    ↶ Restore original
                   </button>
                 )}
                 <button

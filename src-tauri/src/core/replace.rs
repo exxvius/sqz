@@ -50,9 +50,10 @@ fn restore_times(final_path: &Path, atime: FileTime, mtime: FileTime) {
     let _ = set_file_times(final_path, atime, mtime);
 }
 
-/// Swap `encoded` in for `src`. Returns the final path (always `.mkv`).
+/// Swap `encoded` in for `src`. Returns the final path (extension = the run's
+/// output container).
 pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<PathBuf, ReplaceError> {
-    let final_path = src.with_extension("mkv");
+    let final_path = src.with_extension(cfg.container.ext());
     let meta = std::fs::metadata(src)?;
     let atime = FileTime::from_last_access_time(&meta);
     let mtime = FileTime::from_last_modification_time(&meta);
@@ -138,10 +139,46 @@ fn finish_stash(stash: &Path) {
         return;
     }
     let orig = stash.with_file_name(&name[..name.len() - STASH_SUFFIX.len()]);
-    if orig.with_extension("mkv").exists() {
+    // The committed output carries one of the known container extensions; if any
+    // sibling exists the swap completed and the stash is stale.
+    let committed = ["mkv", "mp4"]
+        .iter()
+        .any(|ext| orig.with_extension(ext).exists());
+    if committed {
         let _ = std::fs::remove_file(stash); // swap committed; stash is stale
     } else {
         let _ = std::fs::rename(stash, &orig); // swap interrupted; restore original
+    }
+}
+
+/// Delete held originals older than the configured retention window. A no-op
+/// unless `on_success == Holding`, a `holding_dir` is set, and retention > 0.
+/// Only ever removes files *inside* the holding folder — never a live original.
+pub fn purge_expired_holding(cfg: &Config) {
+    if !matches!(cfg.on_success, OnSuccess::Holding) || cfg.holding_retention_days == 0 {
+        return;
+    }
+    let Some(dir) = &cfg.holding_dir else { return };
+    let max_age = std::time::Duration::from_secs(cfg.holding_retention_days as u64 * 86_400);
+    let now = std::time::SystemTime::now();
+    for entry in walkdir::WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let expired = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|mtime| now.duration_since(mtime).ok())
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+        if expired {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 

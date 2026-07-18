@@ -55,6 +55,11 @@ pub fn run() {
             commands::clear_history,
             commands::get_settings,
             commands::save_settings,
+            commands::restore_original,
+            commands::export_settings,
+            commands::import_settings,
+            commands::export_history,
+            commands::environment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running sqz");

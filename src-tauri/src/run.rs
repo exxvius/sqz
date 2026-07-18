@@ -96,6 +96,8 @@ pub fn run(
     let _ = manifest.recover_processing();
     // Finish any swap a prior crash interrupted before we scan/process.
     crate::core::replace::recover_stashes(&cfg.inputs);
+    // Enforce the holding-folder retention window (no-op unless configured).
+    crate::core::replace::purge_expired_holding(cfg);
 
     let files = discover(cfg);
     for f in &files {
@@ -118,7 +120,7 @@ pub fn run(
     let in_flight = AtomicUsize::new(0);
 
     thread::scope(|scope| {
-        for _ in 0..cfg.workers {
+        for _ in 0..cfg.resolved_workers() {
             scope.spawn(|| loop {
                 if cancel.load(Ordering::Relaxed) {
                     break;
@@ -130,7 +132,7 @@ pub fn run(
                     break;
                 }
 
-                let claimed = match manifest.claim_next_pending() {
+                let claimed = match manifest.claim_next_pending(cfg.order) {
                     Ok(Some(c)) => c,
                     Ok(None) => {
                         // Nothing to claim. Exit only when no one else is working

@@ -8,6 +8,15 @@ export type QualityPreset =
   | "visually-lossless";
 export type OnSuccess = "recycle" | "holding" | "delete";
 export type EncoderFamily = "nvenc" | "amf" | "qsv" | "videotoolbox" | "software";
+export type Container = "mkv" | "mp4";
+export type AudioMode = "copy" | "opus" | "aac";
+export type VerifyDepth = "fast" | "thorough" | "checksummed";
+export type Order =
+  | "smart"
+  | "largest-first"
+  | "smallest-first"
+  | "oldest-first"
+  | "newest-first";
 
 export interface Encoder {
   name: string;
@@ -55,6 +64,14 @@ export interface RunConfig {
   max_height: number;
   on_success: OnSuccess;
   holding_dir?: string | null;
+  holding_retention_days: number;
+  container: Container;
+  audio_mode: AudioMode;
+  audio_bitrate_kbps: number;
+  verify_depth: VerifyDepth;
+  ssim_floor?: number | null;
+  skip_dolby_vision: boolean;
+  order: Order;
   paranoid: boolean;
   hwaccel_decode: boolean;
   dry_run: boolean;
@@ -156,4 +173,15 @@ export interface FileProgress {
 }
 export interface FileEnd {
   path: string;
+}
+
+export interface EnvInfo {
+  os: string;
+  arch: string;
+  cpus: number;
+  locale: string;
+  ffmpeg_present: boolean;
+  ffmpeg_path: string;
+  ffmpeg_version: string | null;
+  detection: Detection | null;
 }

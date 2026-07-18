@@ -5,10 +5,20 @@ import { EncoderPanel } from "../components/EncoderPanel";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { QualityPresets } from "../components/QualityPresets";
 import { NumberField, Switch } from "../components/atoms";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
-import type { FfStatus, OnSuccess, RunConfig, ScanResult } from "../lib/types";
+import type {
+  AudioMode,
+  Container,
+  FfStatus,
+  OnSuccess,
+  Order,
+  RunConfig,
+  ScanResult,
+  VerifyDepth,
+} from "../lib/types";
 
 interface Props {
   config: RunConfig;
@@ -23,6 +33,31 @@ const DISPOSAL: { id: OnSuccess; label: string }[] = [
   { id: "recycle", label: "Recycle Bin" },
   { id: "holding", label: "Holding folder" },
   { id: "delete", label: "Delete" },
+];
+
+const CONTAINERS: { id: Container; label: string }[] = [
+  { id: "mkv", label: "MKV" },
+  { id: "mp4", label: "MP4" },
+];
+
+const AUDIO_OPTIONS: { value: AudioMode; label: string }[] = [
+  { value: "copy", label: "Copy (lossless)" },
+  { value: "opus", label: "Opus" },
+  { value: "aac", label: "AAC" },
+];
+
+const VERIFY_OPTIONS: { value: VerifyDepth; label: string }[] = [
+  { value: "fast", label: "Fast (head + tail)" },
+  { value: "thorough", label: "Thorough (full video)" },
+  { value: "checksummed", label: "Checksummed (all streams)" },
+];
+
+const ORDER_OPTIONS: { value: Order; label: string }[] = [
+  { value: "smart", label: "Smart (resume order)" },
+  { value: "largest-first", label: "Largest first" },
+  { value: "smallest-first", label: "Smallest first" },
+  { value: "oldest-first", label: "Oldest first" },
+  { value: "newest-first", label: "Newest first" },
 ];
 
 export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Props) {
@@ -149,6 +184,49 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
         <Collapsible title="Advanced settings">
           <div className="adv-group">
             <div className="adv-group-title">Output</div>
+            <div className="field">
+              <label>
+                Container
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  MKV holds anything; MP4 suits stricter players/TVs.
+                </div>
+              </label>
+              <div className="seg" role="group" aria-label="Output container">
+                {CONTAINERS.map((c) => (
+                  <button
+                    key={c.id}
+                    aria-pressed={config.container === c.id}
+                    onClick={() => patch({ container: c.id })}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label>
+                Audio
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  Copy keeps audio untouched. Opus/AAC shrink large tracks (MP4 uses AAC).
+                </div>
+              </label>
+              <Select
+                value={config.audio_mode}
+                options={AUDIO_OPTIONS}
+                ariaLabel="Audio handling"
+                onChange={(v) => patch({ audio_mode: v as AudioMode })}
+              />
+            </div>
+            {config.audio_mode !== "copy" && (
+              <NumberField
+                label="Audio bitrate (kbit/s)"
+                value={config.audio_bitrate_kbps}
+                min={32}
+                max={512}
+                step={16}
+                onChange={(audio_bitrate_kbps) => patch({ audio_bitrate_kbps })}
+              />
+            )}
             <NumberField
               label="Max height (downscale taller sources)"
               value={config.max_height}
@@ -190,13 +268,35 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
 
           <div className="adv-group">
             <div className="adv-group-title">Speed &amp; efficiency</div>
-            <NumberField
-              label="Parallel encodes"
-              value={config.workers}
-              min={1}
-              max={8}
-              onChange={(workers) => patch({ workers })}
+            <Switch
+              label="Auto-detect parallel encodes"
+              hint="Pick a sensible worker count from this machine's CPU cores."
+              checked={config.workers === 0}
+              onChange={(on) => patch({ workers: on ? 0 : 2 })}
             />
+            {config.workers !== 0 && (
+              <NumberField
+                label="Parallel encodes"
+                value={config.workers}
+                min={1}
+                max={8}
+                onChange={(workers) => patch({ workers })}
+              />
+            )}
+            <div className="field">
+              <label>
+                Processing order
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  Largest-first reclaims space soonest.
+                </div>
+              </label>
+              <Select
+                value={config.order}
+                options={ORDER_OPTIONS}
+                ariaLabel="Processing order"
+                onChange={(v) => patch({ order: v as Order })}
+              />
+            </div>
             <Switch
               label="Early abort"
               hint="While encoding, project the final size and kill encodes that clearly won't pay off — stricter as they near completion."
@@ -271,12 +371,53 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
 
           <div className="adv-group">
             <div className="adv-group-title">Safety &amp; behavior</div>
+            <div className="field">
+              <label>
+                Verification depth
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  How much of each output to decode before trusting it. Stricter is
+                  safer but slower.
+                </div>
+              </label>
+              <Select
+                value={config.verify_depth}
+                options={VERIFY_OPTIONS}
+                ariaLabel="Verification depth"
+                onChange={(v) => patch({ verify_depth: v as VerifyDepth, paranoid: false })}
+              />
+            </div>
             <Switch
-              label="Paranoid verify"
-              hint="Full-decode the output instead of a quick probe."
-              checked={config.paranoid}
-              onChange={(paranoid) => patch({ paranoid })}
+              label="Perceptual quality floor (SSIM)"
+              hint="Reject an encode and keep the original if it drops below a quality threshold (same-resolution outputs only)."
+              checked={config.ssim_floor != null}
+              onChange={(on) => patch({ ssim_floor: on ? 0.95 : null })}
             />
+            {config.ssim_floor != null && (
+              <NumberField
+                label="Minimum SSIM (0–1)"
+                value={config.ssim_floor}
+                min={0.8}
+                max={1}
+                step={0.01}
+                onChange={(ssim_floor) => patch({ ssim_floor })}
+              />
+            )}
+            <Switch
+              label="Skip Dolby Vision sources"
+              hint="Re-encoding drops the Dolby Vision layer. Leave on to skip DV files (they can still be container-normalized losslessly)."
+              checked={config.skip_dolby_vision}
+              onChange={(skip_dolby_vision) => patch({ skip_dolby_vision })}
+            />
+            {config.on_success === "holding" && (
+              <NumberField
+                label="Holding retention (days, 0 = keep forever)"
+                value={config.holding_retention_days}
+                min={0}
+                max={365}
+                step={1}
+                onChange={(holding_retention_days) => patch({ holding_retention_days })}
+              />
+            )}
             <Switch
               label="Retry previously failed files"
               hint="Re-attempt files that errored in an earlier run."

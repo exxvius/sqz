@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Detection,
+  EnvInfo,
   FfStatus,
   History,
   HistoryFilter,
@@ -31,6 +32,13 @@ export const api = {
   getSettings: () => invoke<Record<string, unknown>>("get_settings"),
   saveSettings: (settings: Record<string, unknown>) =>
     invoke<void>("save_settings", { settings }),
+  restoreOriginal: (path: string) => invoke<void>("restore_original", { path }),
+  exportSettings: (dest: string) => invoke<void>("export_settings", { dest }),
+  importSettings: (src: string) =>
+    invoke<Record<string, unknown>>("import_settings", { src }),
+  exportHistory: (dest: string, format: "csv" | "json", filter: HistoryFilter = {}) =>
+    invoke<number>("export_history", { dest, format, filter }),
+  environment: () => invoke<EnvInfo>("environment"),
   downloadFfmpeg: () => invoke<void>("download_ffmpeg"),
   setFfmpegPaths: (ffmpeg: string, ffprobe: string) =>
     invoke<void>("set_ffmpeg_paths", { ffmpeg, ffprobe }),

@@ -17,10 +17,11 @@ use super::report::{Outcome, ProcessResult, Reporter};
 use super::util::human_bytes;
 use super::verify::{verify_output, VerifyReason};
 
-fn is_mkv(path: &Path) -> bool {
+/// True if `path` already uses the run's target container extension.
+fn is_target_container(path: &Path, cfg: &Config) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("mkv"))
+        .map(|e| e.eq_ignore_ascii_case(cfg.container.ext()))
         .unwrap_or(false)
 }
 
@@ -85,7 +86,7 @@ fn skip_or_normalize(
     cancel: &(dyn Fn() -> bool + Sync),
     reporter: &dyn Reporter,
 ) -> ProcessResult {
-    if cfg.normalize_container && !cfg.dry_run && !is_mkv(src) {
+    if cfg.normalize_container && !cfg.dry_run && !is_target_container(src, cfg) {
         if let Some(r) = try_remux(ff, cfg, manifest, info, src, path_str, size, cancel, reporter) {
             return r;
         }
@@ -110,8 +111,8 @@ fn try_remux(
     reporter: &dyn Reporter,
 ) -> Option<ProcessResult> {
     let temp_dir = temp_dir_for(src, cfg).ok()?;
-    let out = temp_dir.join(format!("sqz_{}.mkv", uuid::Uuid::new_v4().simple()));
-    let args = build_remux_args(info, &out);
+    let out = temp_dir.join(format!("sqz_{}.{}", uuid::Uuid::new_v4().simple(), cfg.container.ext()));
+    let args = build_remux_args(cfg, info, &out);
 
     let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     reporter.on_file_start(path_str, &name, info.duration, size);
@@ -215,6 +216,15 @@ pub fn process_file(
         ..Default::default()
     };
 
+    // Dolby Vision guardrail: re-encoding drops the DV enhancement layer/RPU, so
+    // skip such sources (a lossless container-normalize remux still preserves DV).
+    if !force && cfg.skip_dolby_vision && info.dolby_vision {
+        return skip_or_normalize(
+            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedNoGain, &cancelled,
+            reporter,
+        );
+    }
+
     if !force && is_already_efficient(cfg, &info) {
         return skip_or_normalize(
             ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedEfficient, &cancelled,
@@ -253,7 +263,7 @@ pub fn process_file(
     // NB: we deliberately do not pre-check free space. If the drive fills, the
     // encode simply fails and the original is left untouched (retried next run) —
     // the size gate and verify keep every outcome safe either way.
-    let out = temp_dir.join(format!("sqz_{}.mkv", uuid::Uuid::new_v4().simple()));
+    let out = temp_dir.join(format!("sqz_{}.{}", uuid::Uuid::new_v4().simple(), cfg.container.ext()));
     let args = build_args(cfg, &info, encoder, &out);
 
     // Staged early-abort judge, driven by ffmpeg progress ticks.
@@ -282,7 +292,7 @@ pub fn process_file(
             human_bytes(size as f64)
         );
         // Even a no-gain file can be normalized to the target container.
-        if cfg.normalize_container && !is_mkv(src) {
+        if cfg.normalize_container && !is_target_container(src, cfg) {
             if let Some(r) = try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter) {
                 return r;
             }
@@ -311,16 +321,21 @@ pub fn process_file(
     let vr = verify_output(&ff.ffmpeg, &ff.ffprobe, cfg, &info, &out);
     if !vr.ok {
         cleanup(&out);
-        if vr.reason == VerifyReason::NoGain {
-            if cfg.normalize_container && !is_mkv(src) {
+        // "No gain" and "below quality floor" both mean: keep the original, not an
+        // error. The file may still be container-normalized (stream copy).
+        if matches!(vr.reason, VerifyReason::NoGain | VerifyReason::QualityFloor) {
+            if cfg.normalize_container && !is_target_container(src, cfg) {
                 if let Some(r) =
                     try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter)
                 {
                     return r;
                 }
             }
+            let error = (vr.reason == VerifyReason::QualityFloor)
+                .then(|| format!("quality floor: {}", vr.detail));
             set(manifest, path_str, Outcome::SkippedNoGain, StatusUpdate {
                 out_size: Some(vr.out_size),
+                error,
                 ..meta_upd(&info)
             });
             return ProcessResult::new(path_str, Outcome::SkippedNoGain);
@@ -392,6 +407,7 @@ mod tests {
             color_transfer: None,
             color_space: None,
             color_range: None,
+            dolby_vision: false,
         }
     }
 

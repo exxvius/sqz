@@ -27,8 +27,12 @@ pub const DEFAULT_ABORT_LATE_MIN_SAVINGS: f64 = 0.03;
 /// unlikely to shrink meaningfully.
 pub const DEFAULT_MARGINAL_BPP: f64 = 0.05;
 
-/// Decode-verify probe window (seconds) unless `paranoid` is set.
+/// Decode-verify probe window (seconds) for the fast verification depth.
 pub const DECODE_PROBE_SECONDS: u32 = 5;
+/// Default audio bitrate (kbit/s) when transcoding audio.
+pub const DEFAULT_AUDIO_KBPS: u32 = 128;
+/// Holding retention: 0 means keep originals forever.
+pub const DEFAULT_HOLDING_RETENTION_DAYS: u32 = 0;
 /// Duration match tolerances (the looser of the two wins).
 pub const DURATION_TOLERANCE_S: f64 = 1.0;
 pub const DURATION_TOLERANCE_FRAC: f64 = 0.005;
@@ -106,6 +110,76 @@ pub enum OnSuccess {
     Delete,
 }
 
+/// Output container. MKV is the safe default (holds anything); MP4 is offered
+/// for players/TVs that need it, with the format's stream limits handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Container {
+    Mkv,
+    Mp4,
+}
+
+impl Container {
+    /// Lowercase file extension for this container (no dot).
+    pub fn ext(self) -> &'static str {
+        match self {
+            Container::Mkv => "mkv",
+            Container::Mp4 => "mp4",
+        }
+    }
+}
+
+/// What to do with audio streams on re-encode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioMode {
+    /// Stream-copy audio untouched (default, lossless, fastest).
+    Copy,
+    /// Transcode to Opus (best efficiency; not valid in MP4).
+    Opus,
+    /// Transcode to AAC (broad compatibility).
+    Aac,
+}
+
+/// How deeply to verify an output before trusting it enough to replace the
+/// original. Stricter costs more time but closes more silent-corruption paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VerifyDepth {
+    /// Decode the first and last few seconds of video.
+    Fast,
+    /// Fully decode the video stream.
+    Thorough,
+    /// Fully decode every stream (video + audio) and hash it.
+    Checksummed,
+}
+
+/// Order in which pending files are processed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Order {
+    /// Default resume order (by when the file was last touched).
+    Smart,
+    /// Biggest files first — reclaims space fastest.
+    LargestFirst,
+    SmallestFirst,
+    OldestFirst,
+    NewestFirst,
+}
+
+impl Order {
+    /// SQL `ORDER BY` fragment (column + direction) for the claim query.
+    pub fn sql(self) -> &'static str {
+        match self {
+            Order::Smart => "updated_at ASC",
+            Order::LargestFirst => "size DESC",
+            Order::SmallestFirst => "size ASC",
+            Order::OldestFirst => "mtime ASC",
+            Order::NewestFirst => "mtime DESC",
+        }
+    }
+}
+
 /// Resolved settings for one processing run. `#[serde(default)]` lets the UI
 /// send only the fields it wants to override.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +200,22 @@ pub struct Config {
     pub db_path: Option<PathBuf>,
     pub on_success: OnSuccess,
     pub holding_dir: Option<PathBuf>,
+    /// Delete held originals older than this many days (0 = keep forever).
+    pub holding_retention_days: u32,
+    /// Output container (defaults to MKV).
+    pub container: Container,
+    /// Audio handling (defaults to stream copy).
+    pub audio_mode: AudioMode,
+    pub audio_bitrate_kbps: u32,
+    /// Verification depth. `paranoid` (legacy) forces at least `Thorough`.
+    pub verify_depth: VerifyDepth,
+    /// Optional minimum SSIM (0..1) the output must reach vs the source, else the
+    /// original is kept. `None` disables the perceptual-quality gate.
+    pub ssim_floor: Option<f64>,
+    /// Skip Dolby Vision sources rather than risk dropping the DV layer.
+    pub skip_dolby_vision: bool,
+    /// Processing order for pending files.
+    pub order: Order,
     pub paranoid: bool,
     pub hwaccel_decode: bool,
     pub dry_run: bool,
@@ -159,6 +249,14 @@ impl Default for Config {
             db_path: None,
             on_success: OnSuccess::Recycle,
             holding_dir: None,
+            holding_retention_days: DEFAULT_HOLDING_RETENTION_DAYS,
+            container: Container::Mkv,
+            audio_mode: AudioMode::Copy,
+            audio_bitrate_kbps: DEFAULT_AUDIO_KBPS,
+            verify_depth: VerifyDepth::Fast,
+            ssim_floor: None,
+            skip_dolby_vision: true,
+            order: Order::Smart,
             paranoid: false,
             hwaccel_decode: false,
             dry_run: false,
@@ -184,6 +282,37 @@ impl Config {
             .unwrap_or_else(|| self.codec.base_quality() + self.quality.quality_offset())
     }
 
+    /// Effective verification depth: the legacy `paranoid` flag forces at least
+    /// `Thorough`, so older UIs/settings keep their stronger guarantee.
+    pub fn resolved_verify_depth(&self) -> VerifyDepth {
+        match (self.paranoid, self.verify_depth) {
+            (true, VerifyDepth::Fast) => VerifyDepth::Thorough,
+            (_, depth) => depth,
+        }
+    }
+
+    /// Effective worker count. `workers == 0` means "auto": a sensible fraction
+    /// of the detected cores, clamped so a big machine doesn't spawn a hundred
+    /// FFmpeg processes and a tiny one still makes progress.
+    pub fn resolved_workers(&self) -> usize {
+        if self.workers >= 1 {
+            return self.workers;
+        }
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2);
+        (cores / 2).clamp(1, 8)
+    }
+
+    /// Whether Opus audio is valid in the chosen container (MP4 cannot mux Opus
+    /// in a broadly compatible way, so we fall back to AAC there).
+    pub fn effective_audio_mode(&self) -> AudioMode {
+        match (self.container, self.audio_mode) {
+            (Container::Mp4, AudioMode::Opus) => AudioMode::Aac,
+            (_, mode) => mode,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !(0.0..1.0).contains(&self.min_savings) {
             return Err("min_savings must be in [0, 1)".into());
@@ -191,8 +320,11 @@ impl Config {
         if !(0.0 < self.abort_check_at && self.abort_check_at < 1.0) {
             return Err("abort_check_at must be in (0, 1)".into());
         }
-        if self.workers < 1 {
-            return Err("workers must be >= 1".into());
+        // workers == 0 is the "auto" sentinel; any positive value is explicit.
+        if let Some(floor) = self.ssim_floor {
+            if !(0.0..=1.0).contains(&floor) {
+                return Err("ssim_floor must be in [0, 1]".into());
+            }
         }
         if matches!(self.on_success, OnSuccess::Holding) && self.holding_dir.is_none() {
             return Err("on_success=holding requires holding_dir".into());
@@ -249,5 +381,51 @@ mod tests {
             ..Config::default()
         };
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn paranoid_forces_at_least_thorough() {
+        let cfg = Config { paranoid: true, verify_depth: VerifyDepth::Fast, ..Config::default() };
+        assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Thorough);
+        // An explicit stronger depth is preserved.
+        let cfg = Config { paranoid: true, verify_depth: VerifyDepth::Checksummed, ..Config::default() };
+        assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Checksummed);
+        // Without paranoid, the chosen depth stands.
+        let cfg = Config { paranoid: false, verify_depth: VerifyDepth::Fast, ..Config::default() };
+        assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Fast);
+    }
+
+    #[test]
+    fn auto_workers_resolves_to_a_sane_positive_count() {
+        let cfg = Config { workers: 0, ..Config::default() };
+        let n = cfg.resolved_workers();
+        assert!((1..=8).contains(&n));
+        // Explicit worker counts pass through untouched.
+        let cfg = Config { workers: 5, ..Config::default() };
+        assert_eq!(cfg.resolved_workers(), 5);
+    }
+
+    #[test]
+    fn opus_falls_back_to_aac_in_mp4() {
+        let cfg = Config { container: Container::Mp4, audio_mode: AudioMode::Opus, ..Config::default() };
+        assert_eq!(cfg.effective_audio_mode(), AudioMode::Aac);
+        let cfg = Config { container: Container::Mkv, audio_mode: AudioMode::Opus, ..Config::default() };
+        assert_eq!(cfg.effective_audio_mode(), AudioMode::Opus);
+    }
+
+    #[test]
+    fn container_extensions_and_order_sql() {
+        assert_eq!(Container::Mkv.ext(), "mkv");
+        assert_eq!(Container::Mp4.ext(), "mp4");
+        assert_eq!(Order::LargestFirst.sql(), "size DESC");
+        assert_eq!(Order::OldestFirst.sql(), "mtime ASC");
+    }
+
+    #[test]
+    fn validate_rejects_ssim_floor_out_of_range() {
+        let cfg = Config { ssim_floor: Some(1.5), ..Config::default() };
+        assert!(cfg.validate().is_err());
+        let cfg = Config { ssim_floor: Some(0.95), ..Config::default() };
+        assert!(cfg.validate().is_ok());
     }
 }

@@ -196,17 +196,22 @@ impl Manifest {
     }
 
     /// Atomically claim the next pending file, marking it `processing` so no other
-    /// worker takes it. Returns the path and whether it was flagged force-process.
-    pub fn claim_next_pending(&self) -> rusqlite::Result<Option<ClaimedFile>> {
+    /// worker takes it. `order` chooses which pending file wins. Returns the path
+    /// and whether it was flagged force-process.
+    pub fn claim_next_pending(
+        &self,
+        order: super::config::Order,
+    ) -> rusqlite::Result<Option<ClaimedFile>> {
         use rusqlite::OptionalExtension;
         let conn = self.conn.lock().unwrap();
+        // `order.sql()` returns a fixed internal fragment (never user input).
+        let sql = format!(
+            "SELECT path, COALESCE(forced, 0) FROM files WHERE status=?1 \
+             ORDER BY {} LIMIT 1",
+            order.sql()
+        );
         let claimed: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT path, COALESCE(forced, 0) FROM files WHERE status=?1 \
-                 ORDER BY updated_at LIMIT 1",
-                params![STATUS_PENDING],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
+            .query_row(&sql, params![STATUS_PENDING], |r| Ok((r.get(0)?, r.get(1)?)))
             .optional()?;
         if let Some((path, forced)) = &claimed {
             conn.execute(
