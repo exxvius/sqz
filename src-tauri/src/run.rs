@@ -94,6 +94,8 @@ pub fn run(
     active: &ActiveMap,
 ) -> RunSummary {
     let _ = manifest.recover_processing();
+    // Finish any swap a prior crash interrupted before we scan/process.
+    crate::core::replace::recover_stashes(&cfg.inputs);
 
     let files = discover(cfg);
     for f in &files {

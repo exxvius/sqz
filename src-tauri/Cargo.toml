@@ -1,6 +1,6 @@
 [package]
 name = "sqz"
-version = "1.0.0"
+version = "1.0.1"
 description = "Squeeze your video library. Reclaim disk space. Never lose a file."
 authors = ["sqz contributors"]
 license = "MIT"

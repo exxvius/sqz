@@ -43,13 +43,55 @@ pub struct ProgressSample {
     pub bitrate_kbps: Option<f64>,
 }
 
-/// NVENC wants 4:2:0; pick 10-bit (p010le) for 10/12-bit sources else 8-bit.
-fn pix_fmt(info: &MediaInfo) -> &'static str {
-    if info.is_10bit() {
-        "p010le"
-    } else {
-        "yuv420p"
+/// Choose the 4:2:0 output pixel format that preserves as much of the source's
+/// bit depth as the chosen encoder can actually carry.
+///
+/// - 8-bit sources → `yuv420p`.
+/// - 10-bit sources → `yuv420p10le` (software) / `p010le` (hardware).
+/// - 12-bit sources → `yuv420p12le` only where the encoder supports it
+///   (currently libx265); everything else can only do 10-bit, so we step down
+///   to 10-bit rather than silently truncating to 8-bit. The step-down is
+///   logged by [`build_args`] so it is never silent.
+fn pix_fmt(info: &MediaInfo, encoder: &Encoder) -> &'static str {
+    if !info.is_10bit() {
+        return "yuv420p"; // 8-bit source
     }
+    let supports_12bit = encoder.name == "libx265";
+    if info.is_12bit() && supports_12bit {
+        return "yuv420p12le";
+    }
+    // 10-bit target: hardware uses the semi-planar p010le; software the planar form.
+    match encoder.family {
+        EncoderFamily::Software => "yuv420p10le",
+        _ => "p010le",
+    }
+}
+
+/// True for a color-characteristic value worth passing to the encoder.
+fn meaningful_color(v: &str) -> bool {
+    let v = v.trim();
+    !v.is_empty() && !matches!(v.to_ascii_lowercase().as_str(), "unknown" | "reserved" | "n/a")
+}
+
+/// Explicit `-color_*` flags echoing the source's characteristics, so the output
+/// is tagged correctly (an HDR source must not be re-tagged/interpreted as SDR).
+fn color_args(info: &MediaInfo) -> Vec<String> {
+    let mut a = Vec::new();
+    let pairs = [
+        ("-color_primaries", info.color_primaries.as_deref()),
+        ("-color_trc", info.color_transfer.as_deref()),
+        ("-colorspace", info.color_space.as_deref()),
+        ("-color_range", info.color_range.as_deref()),
+    ];
+    for (flag, val) in pairs {
+        if let Some(v) = val {
+            if meaningful_color(v) {
+                a.push(flag.to_string());
+                a.push(v.to_string());
+            }
+        }
+    }
+    a
 }
 
 /// Copy subtitles into MKV, converting mp4 timed-text which MKV can't copy.
@@ -145,8 +187,23 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     a.push("-c:v".into());
     a.push(encoder.name.clone());
     a.extend(encoder_rate_args(encoder, cfg.resolved_quality()));
+
+    let pf = pix_fmt(info, encoder);
+    if info.is_12bit() && pf != "yuv420p12le" {
+        tracing::warn!(
+            encoder = %encoder.name,
+            "12-bit source encoded at 10-bit: {} lacks 12-bit encode support",
+            encoder.name
+        );
+    }
     a.push("-pix_fmt".into());
-    a.push(pix_fmt(info).into());
+    a.push(pf.into());
+
+    // Preserve HDR/color characteristics on re-encode.
+    if info.is_hdr() {
+        tracing::info!(trc = ?info.color_transfer, "preserving HDR color metadata on re-encode");
+    }
+    a.extend(color_args(info));
 
     a.extend(subtitle_args(info).iter().map(|s| s.to_string()));
 
@@ -346,6 +403,10 @@ mod tests {
             fps: Some(30.0),
             size: Some(60_000_000),
             sub_codecs: vec![],
+            color_primaries: None,
+            color_transfer: None,
+            color_space: None,
+            color_range: None,
         }
     }
 
@@ -389,6 +450,52 @@ mod tests {
         let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
         let a = build_args(&cfg, &info(1080, true), &e, Path::new("o.mkv")).join(" ");
         assert!(a.contains("-pix_fmt p010le"));
+    }
+
+    #[test]
+    fn software_ten_bit_uses_planar_form() {
+        let e = enc("libx265", EncoderFamily::Software);
+        assert_eq!(pix_fmt(&info(1080, true), &e), "yuv420p10le");
+    }
+
+    #[test]
+    fn twelve_bit_preserved_on_libx265_but_stepped_down_elsewhere() {
+        let mut m = info(1080, false);
+        m.pix_fmt = Some("yuv420p12le".into());
+        // libx265 keeps 12-bit.
+        assert_eq!(pix_fmt(&m, &enc("libx265", EncoderFamily::Software)), "yuv420p12le");
+        // SVT-AV1 is 8/10-bit only → step down to 10-bit, never truncate to 8.
+        assert_eq!(pix_fmt(&m, &enc("libsvtav1", EncoderFamily::Software)), "yuv420p10le");
+        // Hardware caps at 10-bit → p010le.
+        assert_eq!(pix_fmt(&m, &enc("av1_nvenc", EncoderFamily::Nvenc)), "p010le");
+    }
+
+    #[test]
+    fn hdr_color_metadata_is_passed_through() {
+        let cfg = Config::default();
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        let mut m = info(2160, true);
+        m.color_primaries = Some("bt2020".into());
+        m.color_transfer = Some("smpte2084".into());
+        m.color_space = Some("bt2020nc".into());
+        m.color_range = Some("tv".into());
+        let a = build_args(&cfg, &m, &e, Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-color_primaries bt2020"));
+        assert!(a.contains("-color_trc smpte2084"));
+        assert!(a.contains("-colorspace bt2020nc"));
+        assert!(a.contains("-color_range tv"));
+    }
+
+    #[test]
+    fn unknown_color_values_are_dropped() {
+        let cfg = Config::default();
+        let e = enc("libx265", EncoderFamily::Software);
+        let mut m = info(1080, false);
+        m.color_primaries = Some("unknown".into());
+        m.color_transfer = Some("bt709".into());
+        let a = build_args(&cfg, &m, &e, Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-color_primaries"));
+        assert!(a.contains("-color_trc bt709"));
     }
 
     #[test]

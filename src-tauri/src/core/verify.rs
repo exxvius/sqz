@@ -48,14 +48,27 @@ fn duration_ok(src: Option<f64>, out: Option<f64>) -> bool {
     }
 }
 
-/// Decode the output (fully if paranoid, else first N seconds) to catch corruption.
-fn decode_probe(ffmpeg: &Path, cfg: &Config, out_path: &Path) -> (bool, String) {
+/// Decode one segment of the output to null, catching corruption. `seek_from_end`
+/// (seconds) probes the tail via `-sseof`; `limit` (seconds) bounds the decode.
+/// Returns `(ok, detail)` where `ok` reflects ffmpeg's exit code (authoritative
+/// under `-xerror`).
+fn decode_segment(
+    ffmpeg: &Path,
+    out_path: &Path,
+    seek_from_end: Option<u32>,
+    limit: Option<u32>,
+) -> (bool, String) {
     let mut cmd = command_no_window(ffmpeg);
     cmd.args(["-v", "error", "-xerror"]);
-    if !cfg.paranoid {
-        cmd.args(["-t", &DECODE_PROBE_SECONDS.to_string()]);
+    // `-sseof` must precede `-i` (it is an input option).
+    if let Some(sec) = seek_from_end {
+        cmd.args(["-sseof", &format!("-{sec}")]);
     }
-    cmd.arg("-i").arg(out_path).args(["-f", "null", "-"]);
+    cmd.arg("-i").arg(out_path);
+    if let Some(sec) = limit {
+        cmd.args(["-t", &sec.to_string()]);
+    }
+    cmd.args(["-f", "null", "-"]);
 
     let out = match cmd
         .stdout(Stdio::null())
@@ -80,6 +93,24 @@ fn decode_probe(ffmpeg: &Path, cfg: &Config, out_path: &Path) -> (bool, String) 
         stderr.chars().take(400).collect()
     };
     (false, detail)
+}
+
+/// Decode-verify the output. Paranoid decodes the whole file; the fast path
+/// decodes both the first *and last* N seconds — checking only the head would let
+/// mid/tail corruption pass verification and trigger deletion of a good original.
+fn decode_probe(ffmpeg: &Path, cfg: &Config, out_path: &Path) -> (bool, String) {
+    if cfg.paranoid {
+        return decode_segment(ffmpeg, out_path, None, None);
+    }
+    let (ok, detail) = decode_segment(ffmpeg, out_path, None, Some(DECODE_PROBE_SECONDS));
+    if !ok {
+        return (false, format!("head: {detail}"));
+    }
+    let (ok, detail) = decode_segment(ffmpeg, out_path, Some(DECODE_PROBE_SECONDS), None);
+    if !ok {
+        return (false, format!("tail: {detail}"));
+    }
+    (true, String::new())
 }
 
 /// The four gates, in order: structural probe, duration match, decode probe,

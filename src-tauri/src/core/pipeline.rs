@@ -388,6 +388,10 @@ mod tests {
             fps: Some(30.0),
             size: Some(50_000_000),
             sub_codecs: vec![],
+            color_primaries: None,
+            color_transfer: None,
+            color_space: None,
+            color_range: None,
         }
     }
 

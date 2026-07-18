@@ -41,12 +41,32 @@ pub struct MediaInfo {
     pub fps: Option<f64>,
     pub size: Option<u64>,
     pub sub_codecs: Vec<String>,
+    /// Color characteristics, carried through on re-encode so HDR is never
+    /// silently reinterpreted as SDR. `None`/"unknown" ⇒ leave to the encoder.
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_space: Option<String>,
+    pub color_range: Option<String>,
 }
 
 impl MediaInfo {
+    /// True for a source that needs a >8-bit output format (10- or 12-bit).
     pub fn is_10bit(&self) -> bool {
         let pf = self.pix_fmt.as_deref().unwrap_or("");
         pf.contains("10") || pf.contains("12")
+    }
+
+    /// True for a 12-bit source specifically (a superset check of [`is_10bit`]).
+    pub fn is_12bit(&self) -> bool {
+        self.pix_fmt.as_deref().unwrap_or("").contains("12")
+    }
+
+    /// True when the transfer function marks the source as HDR (PQ or HLG).
+    pub fn is_hdr(&self) -> bool {
+        matches!(
+            self.color_transfer.as_deref(),
+            Some("smpte2084") | Some("arib-std-b67")
+        )
     }
 
     pub fn has_text_mp4_subs(&self) -> bool {
@@ -85,6 +105,16 @@ fn to_f64(v: Option<&serde_json::Value>) -> Option<f64> {
         return Some(n);
     }
     v.as_str().and_then(|s| s.trim().parse::<f64>().ok())
+}
+
+/// A color-characteristic string, or `None` when ffprobe reports it as absent or
+/// a placeholder ("unknown"/"reserved"/"N/A") we must not pass to the encoder.
+fn color_field(v: Option<&serde_json::Value>) -> Option<String> {
+    let s = v?.as_str()?.trim();
+    if s.is_empty() || matches!(s.to_ascii_lowercase().as_str(), "unknown" | "reserved" | "n/a") {
+        return None;
+    }
+    Some(s.to_string())
 }
 
 /// Parse an ffprobe frame-rate string like "30000/1001" or "25/1".
@@ -136,9 +166,21 @@ pub fn probe(ffprobe: &Path, path: &Path, timeout: Duration) -> Result<MediaInfo
     let empty: Vec<serde_json::Value> = Vec::new();
     let streams = data["streams"].as_array().unwrap_or(&empty);
 
+    // Prefer a real video stream over embedded cover art (an `attached_pic`
+    // mjpeg/png stream on audio files reports codec_type=="video" too, and
+    // treating it as the video would mis-drive codec/resolution decisions).
+    let is_video = |s: &&serde_json::Value| s["codec_type"] == "video";
+    let is_cover = |s: &&serde_json::Value| {
+        s.get("disposition")
+            .and_then(|d| d.get("attached_pic"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+            != 0
+    };
     let video = streams
         .iter()
-        .find(|s| s["codec_type"] == "video")
+        .find(|s| is_video(s) && !is_cover(s))
+        .or_else(|| streams.iter().find(is_video))
         .ok_or(ProbeError::NoVideo)?;
 
     let duration = to_f64(video.get("duration")).or_else(|| to_f64(fmt.get("duration")));
@@ -177,6 +219,10 @@ pub fn probe(ffprobe: &Path, path: &Path, timeout: Duration) -> Result<MediaInfo
         fps,
         size,
         sub_codecs,
+        color_primaries: color_field(video.get("color_primaries")),
+        color_transfer: color_field(video.get("color_transfer")),
+        color_space: color_field(video.get("color_space")),
+        color_range: color_field(video.get("color_range")),
     })
 }
 
@@ -225,6 +271,10 @@ mod tests {
             fps: Some(30.0),
             size: Some(40_000_000),
             sub_codecs: vec![],
+            color_primaries: None,
+            color_transfer: None,
+            color_space: None,
+            color_range: None,
         }
     }
 
@@ -234,6 +284,36 @@ mod tests {
         assert!(!m.is_10bit());
         m.pix_fmt = Some("yuv420p10le".into());
         assert!(m.is_10bit());
+    }
+
+    #[test]
+    fn detects_12bit_and_still_reads_as_high_depth() {
+        let mut m = base();
+        m.pix_fmt = Some("yuv420p12le".into());
+        assert!(m.is_12bit());
+        assert!(m.is_10bit()); // 12-bit is a superset of "needs >8-bit output"
+    }
+
+    #[test]
+    fn hdr_detected_from_transfer() {
+        let mut m = base();
+        assert!(!m.is_hdr());
+        m.color_transfer = Some("smpte2084".into());
+        assert!(m.is_hdr());
+        m.color_transfer = Some("arib-std-b67".into());
+        assert!(m.is_hdr());
+        m.color_transfer = Some("bt709".into());
+        assert!(!m.is_hdr());
+    }
+
+    #[test]
+    fn color_field_rejects_placeholders() {
+        use serde_json::json;
+        assert_eq!(color_field(Some(&json!("bt2020"))), Some("bt2020".into()));
+        assert_eq!(color_field(Some(&json!("unknown"))), None);
+        assert_eq!(color_field(Some(&json!("N/A"))), None);
+        assert_eq!(color_field(Some(&json!(""))), None);
+        assert_eq!(color_field(None), None);
     }
 
     #[test]
