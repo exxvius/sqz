@@ -1,9 +1,7 @@
 <div align="center">
 
 <img src="docs/images/banner.png" alt="sqz — bulk re-encode your library to modern codecs, reclaim disk space, never lose a file" width="100%">
-
 <br><br>
-
 [![CI](https://img.shields.io/github/actions/workflow/status/exxvius/sqz/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/exxvius/sqz/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/exxvius/sqz?label=version&style=flat-square&color=2ea043)](https://github.com/exxvius/sqz/releases)
 [![License: MIT](https://img.shields.io/github/license/exxvius/sqz?style=flat-square&color=blue)](LICENSE)
