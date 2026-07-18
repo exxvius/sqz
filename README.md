@@ -49,6 +49,11 @@ Nothing destructive happens until the new file has earned it:
   &nbsp;
   <img src="docs/images/history-dark.png" alt="History: reclaimed space, filters, per-file results" width="49%">
 </p>
+<p align="center">
+  <img src="docs/images/live-encodes-dark.png" alt="Live: in-flight encodes with per-file progress, projected savings, speed, and ETA" width="49%">
+  &nbsp;
+  <img src="docs/images/settings-violet-dark.png" alt="Settings: recolorable accent theming (Violet shown), bundled FFmpeg, and data controls" width="49%">
+</p>
 
 ## Hardware & quality
 

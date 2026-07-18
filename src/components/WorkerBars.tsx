@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { ActiveFile } from "../lib/store";
 import { humanBytes, pct } from "../lib/format";
 
@@ -49,8 +50,8 @@ export function WorkerBars({ active, minSavings }: Props) {
               </span>
               <span className="muted mono">{humanBytes(f.srcSize)}</span>
             </div>
-            <div className="bar">
-              <span style={{ width: pct(d.progress) }} />
+            <div className="bar" style={{ "--p": d.progress } as CSSProperties}>
+              <span />
             </div>
             <div className="worker-meta">
               <span>{pct(d.progress)}</span>

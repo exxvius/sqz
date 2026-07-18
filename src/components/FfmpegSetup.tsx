@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, pickBinary } from "../lib/api";
-import { humanBytes, pct } from "../lib/format";
+import { humanBytes } from "../lib/format";
 import type { FfStatus, FfmpegProgress } from "../lib/types";
 
 interface Props {
@@ -88,8 +88,8 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
 
       {busy && progress ? (
         <div style={{ margin: "var(--space-3) 0" }}>
-          <div className="bar tall">
-            <span style={{ width: pct(frac) }} />
+          <div className="bar tall" style={{ "--p": frac } as CSSProperties}>
+            <span />
           </div>
           <div className="muted" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}>
             {progress.stage === "extract"

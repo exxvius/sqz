@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { ActiveFile } from "../lib/store";
 import { fmtDuration, humanBytes, pct } from "../lib/format";
 
@@ -69,8 +69,8 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
               </button>
             </div>
 
-            <div className="bar tall">
-              <span className={d.klass} style={{ width: pct(d.progress) }} />
+            <div className="bar tall" style={{ "--p": d.progress } as CSSProperties}>
+              <span className={d.klass} />
             </div>
 
             <div className="live-stats">

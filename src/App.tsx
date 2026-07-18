@@ -10,6 +10,7 @@ import { HistoryIcon, HomeIcon, LiveIcon, Logo, SettingsIcon } from "./component
 import { StoreProvider, useStore } from "./lib/store";
 import { useTheme } from "./lib/theme";
 import { useAccent } from "./lib/accent";
+import { initCursorFx } from "./lib/cursor";
 import type { FfStatus, RunConfig } from "./lib/types";
 import type { ComponentType } from "react";
 
@@ -31,6 +32,9 @@ function Shell() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem("sqz-onboarded"),
   );
+
+  // Cursor-driven spotlight/border-glow on cards + background parallax.
+  useEffect(() => initCursorFx(), []);
 
   const loaded = useRef(false);
   const [ff, setFf] = useState<FfStatus | null>(null);
@@ -94,6 +98,13 @@ function Shell() {
 
   return (
     <div className="app">
+      <div className="lava" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+
       <aside className="sidebar">
         <div className="brand">
           <Logo size={30} />

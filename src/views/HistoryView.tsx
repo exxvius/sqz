@@ -28,10 +28,13 @@ const CHIPS: { id: Status; label: string }[] = [
   { id: "processing", label: "Processing" },
 ];
 
+const PAGE_SIZE = 25;
+
 export function HistoryView() {
   const store = useStore();
   const [history, setHistory] = useState<History | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [statuses, setStatuses] = useState<Set<Status>>(() => {
     try {
       const saved = localStorage.getItem("sqz-history-filter");
@@ -45,6 +48,9 @@ export function HistoryView() {
   useEffect(() => {
     localStorage.setItem("sqz-history-filter", JSON.stringify([...statuses]));
   }, [statuses]);
+
+  // Any filter change resets to the first page.
+  useEffect(() => setPage(0), [search, statuses]);
 
   const filter = useCallback(
     () => ({ search: search || undefined, statuses: [...statuses], limit: 1000 }),
@@ -123,6 +129,14 @@ export function HistoryView() {
 
   const counts = history?.counts ?? {};
 
+  // Client-side pagination: only PAGE_SIZE cards are rendered at once — rendering
+  // thousands of collapsible rows is what bogs the page down.
+  const allRows = history?.rows ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageStart = clampedPage * PAGE_SIZE;
+  const pageRows = allRows.slice(pageStart, pageStart + PAGE_SIZE);
+
   return (
     <div className="view">
       <div className="view-head">
@@ -173,7 +187,7 @@ export function HistoryView() {
         )}
       </div>
 
-      <div className="card">
+      <div className="card card-flat">
         <div className="filterbar">
           <input
             className="search"
@@ -201,7 +215,11 @@ export function HistoryView() {
 
         <div className="history-toolbar">
           <span className="muted">
-            {history ? `${history.rows.length} shown` : "loading…"}
+            {history
+              ? allRows.length === 0
+                ? "0 shown"
+                : `${pageStart + 1}–${pageStart + pageRows.length} of ${allRows.length}`
+              : "loading…"}
           </span>
           <div className="grow" />
           <button className="mini-btn" onClick={exportHistory}>
@@ -215,8 +233,8 @@ export function HistoryView() {
           </button>
         </div>
 
-        {history && history.rows.length > 0 ? (
-          history.rows.map((r) => {
+        {history && allRows.length > 0 ? (
+          pageRows.map((r) => {
             const m = statusMeta(r.status);
             const savedTag =
               r.saved_bytes && r.saved_bytes > 0 ? (
@@ -312,6 +330,28 @@ export function HistoryView() {
           })
         ) : (
           <div className="empty">Nothing matches.</div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="pager">
+            <button
+              className="mini-btn"
+              disabled={clampedPage === 0}
+              onClick={() => setPage(clampedPage - 1)}
+            >
+              ‹ Prev
+            </button>
+            <span className="muted">
+              Page {clampedPage + 1} of {totalPages}
+            </span>
+            <button
+              className="mini-btn"
+              disabled={clampedPage >= totalPages - 1}
+              onClick={() => setPage(clampedPage + 1)}
+            >
+              Next ›
+            </button>
+          </div>
         )}
       </div>
     </div>

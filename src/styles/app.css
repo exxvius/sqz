@@ -193,6 +193,103 @@
   color: var(--text-faint);
   margin-bottom: var(--space-4);
 }
+/* Title row with a trailing action (e.g. the event-log Clear button). */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.card-head .card-title {
+  margin-bottom: 0;
+}
+
+/* ---- Cursor border glow (cards) ----
+   --mx/--my are the pointer position within the hovered card, set in
+   lib/cursor.ts. The glow fades in only on hover. */
+/* Applies to standalone cards and each per-file card (.live-card, .ecard), but
+   NOT to list-holder cards (.card-flat), whose children are the real cards. */
+.card:not(.card-flat),
+.live-card,
+.ecard,
+.dropzone {
+  position: relative;
+  isolation: isolate;
+}
+/* Border glow: a gradient ring, brightest nearest the cursor, masked to just the
+   1px border via the padding-box/border-box exclude trick. Opacity is driven by
+   --glow (cursor-proximity, set in lib/cursor.ts), so the edge facing the cursor
+   lights up even when the pointer is outside the card — no :hover needed. */
+.card:not(.card-flat)::after,
+.live-card::after,
+.ecard::after,
+.dropzone::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(
+    360px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in oklab, var(--accent) 75%, white),
+    color-mix(in oklab, var(--accent) 30%, transparent) 45%,
+    transparent 66%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: calc(var(--glow, 0) * 0.9);
+  transition: opacity 200ms var(--ease);
+  pointer-events: none;
+}
+
+/* ---- Shiny text on hover (nav labels, card titles) ----
+   A near-white highlight band sweeps across the glyphs while hovered. The
+   gradient is always clipped to the text but only becomes visible when
+   text-fill goes transparent on hover, so idle text renders normally. */
+.nav-item .grow {
+  background-image: linear-gradient(
+    110deg,
+    currentColor 30%,
+    color-mix(in oklab, currentColor 42%, white) 50%,
+    currentColor 70%
+  );
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.nav-item:hover .grow {
+  -webkit-text-fill-color: transparent;
+  animation: text-shine 1.3s linear infinite;
+}
+/* Card titles get a gentler, slower sweep with a softer highlight — the labels
+   are small and faint, so a bright/fast shine reads as noisy. */
+.card-title {
+  background-image: linear-gradient(
+    110deg,
+    currentColor 35%,
+    color-mix(in oklab, currentColor 68%, white) 50%,
+    currentColor 65%
+  );
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.card:not(.card-flat):hover .card-title,
+.live-card:hover .card-title {
+  -webkit-text-fill-color: transparent;
+  animation: text-shine 3.4s linear infinite;
+}
+@keyframes text-shine {
+  to {
+    background-position: -100% 0;
+  }
+}
 
 /* ---- Drop zone ---- */
 .dropzone {
@@ -532,36 +629,124 @@
   white-space: nowrap;
 }
 .bar {
-  height: 8px;
+  /* Progress fraction (0..1) is set inline on the .bar element; the fill width
+     and the glow's track-relative position both derive from it. --bar-c/--bar-c2
+     drive the color; :has() lets status bars recolor the whole thing (track,
+     fill, glow) from the status class on the fill span. */
+  --p: 0;
+  --bar-c: var(--accent);
+  --bar-c2: var(--accent-2);
+  height: 4px;
   border-radius: 999px;
   background: var(--track-bg);
   box-shadow: var(--track-shadow);
-  overflow: hidden;
+  position: relative;
+  /* overflow stays visible so the leading-edge glow bleeds above/below. */
+}
+.bar:has(> span.good) {
+  --bar-c: var(--ok);
+  --bar-c2: oklch(70% 0.15 158);
+}
+.bar:has(> span.warn) {
+  --bar-c: var(--warn);
+  --bar-c2: oklch(78% 0.14 85);
+}
+.bar:has(> span.bad) {
+  --bar-c: var(--bad);
+  --bar-c2: oklch(62% 0.19 25);
 }
 .bar > span {
   position: relative;
   display: block;
   height: 100%;
+  width: calc(var(--p) * 100%);
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 12px -2px var(--accent),
-    inset 0 1px 0 oklch(100% 0 0 / 0.45);
+  /* Flowing shimmer within the fill: a brighter highlight band (accent mixed
+     toward white) slides through the accent base, so it reads as a live gradient
+     rather than a flat accent bar. Endpoints match for seamless tiling. */
+  background-image: linear-gradient(
+    100deg,
+    var(--bar-c) 0%,
+    var(--bar-c2) 30%,
+    color-mix(in oklab, var(--bar-c) 45%, white) 50%,
+    var(--bar-c2) 70%,
+    var(--bar-c) 100%
+  );
+  background-size: 200% 100%;
+  box-shadow: 0 0 6px -2px var(--bar-c), inset 0 1px 0 oklch(100% 0 0 / 0.4);
   transition: width 200ms linear;
+  /* Same 1.8s period as the glow. Linear + a start offset so the highlight
+     crosses the tip (background-position 0) at exactly 32% of the cycle — the
+     moment the glow reveal reaches the tip — keeping the two locked together. */
+  animation: bar-flow 1.8s linear infinite;
 }
-/* Glassy sheen — a light-catching highlight over the top of the fill, applied
-   independently of the color layer so status-colored bars keep it too. */
-.bar > span::after {
+/* Leading-edge glow (CodePen zxOKXmP technique): a short blurred segment —
+   ~30% of the whole track — sitting just behind the tip, fading transparent
+   toward the tail. Positioned on the track (not the fill) so its length is a
+   share of the whole bar. Actively pulses, and fades out over the last few
+   percent so a finished bar sits clean. */
+.bar::after {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    oklch(100% 0 0 / 0.32) 0%,
-    oklch(100% 0 0 / 0.08) 45%,
-    oklch(100% 0 0 / 0) 100%
-  );
+  top: -1px;
+  bottom: -1px;
+  /* Spans the full fill, transparent tail → bright tip. */
+  left: 0;
+  width: calc(var(--p) * 100%);
+  --glow-fade: clamp(0, (1 - var(--p)) * 100, 1);
+  background-image: linear-gradient(90deg, transparent, var(--bar-c));
+  /* The reveal is driven by background-size growing from the left toward the tip
+     — NOT a mask. A mask (or clip) would re-clip the blurred result back into a
+     hard box; animating the painted region instead lets blur() bloom freely for
+     a soft, diffuse halo. */
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+  filter: blur(6px);
   pointer-events: none;
+  opacity: 0;
+  /* Fast start that decelerates into the end (same 1.8s cycle). */
+  animation: bar-pulse 1.8s cubic-bezier(0.2, 0.9, 0.3, 1) infinite;
+}
+@keyframes bar-flow {
+  from {
+    background-position: 64% 0;
+  }
+  to {
+    background-position: -136% 0;
+  }
+}
+/* Each cycle: invisible → the glow reveals from the left toward the tip while
+   brightening, reaching full reveal exactly at the peak, then fades out — so the
+   hot tip is never held for long. --glow-fade scales the peak so the glow also
+   fades out as progress nears 100%. */
+@keyframes bar-pulse {
+  0% {
+    background-size: 0% 100%;
+    opacity: 0;
+    /* Reveal: fast start, decelerating into the peak. */
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  32% {
+    background-size: 100% 100%;
+    opacity: calc(var(--glow-fade) * 0.72);
+    /* Fade-out: eased (slow) at the start, accelerating toward invisible. */
+    animation-timing-function: cubic-bezier(0.5, 0, 1, 1);
+  }
+  100% {
+    background-size: 100% 100%;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar > span,
+  .bar::after {
+    animation: none;
+  }
+  .bar::after {
+    background-size: 100% 100%;
+    opacity: calc(var(--glow-fade) * 0.55);
+  }
 }
 .worker-meta {
   display: flex;
@@ -1005,7 +1190,6 @@
 /* ---- Live file cards (rich) ---- */
 .live-card {
   border: 1px solid var(--glass-border);
-  border-left: 2px solid var(--accent);
   border-radius: var(--radius);
   padding: var(--space-4);
   background: linear-gradient(160deg, var(--accent-quiet), transparent 45%), var(--glass-bg);
@@ -1042,20 +1226,10 @@
   color: var(--bad);
 }
 .bar.tall {
-  height: 10px;
+  height: 5px;
 }
-.bar > span.good {
-  background: linear-gradient(90deg, oklch(70% 0.15 158), var(--ok));
-  box-shadow: 0 0 12px -2px var(--ok), inset 0 1px 0 oklch(100% 0 0 / 0.45);
-}
-.bar > span.warn {
-  background: linear-gradient(90deg, oklch(78% 0.14 85), var(--warn));
-  box-shadow: 0 0 12px -2px var(--warn), inset 0 1px 0 oklch(100% 0 0 / 0.45);
-}
-.bar > span.bad {
-  background: linear-gradient(90deg, oklch(62% 0.19 25), var(--bad));
-  box-shadow: 0 0 12px -2px var(--bad), inset 0 1px 0 oklch(100% 0 0 / 0.45);
-}
+/* Status colors are applied on the .bar via :has() (see the .bar block) so the
+   track, fill, and glow all recolor together. */
 .live-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
@@ -1319,4 +1493,15 @@
   align-items: center;
   margin-bottom: var(--space-4);
   flex-wrap: wrap;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.mini-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }

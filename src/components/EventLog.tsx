@@ -16,9 +16,11 @@ export function EventLog({ log, onRetry, onForce }: Props) {
     return <div className="empty">Events appear here as files are processed.</div>;
   }
 
+  // Only the most recent entries are rendered (log is newest-first); thousands
+  // of cards would bog the page down. Older events remain in the History tab.
   return (
     <div>
-      {log.map((e, i) => {
+      {log.slice(0, 25).map((e, i) => {
         const m = outcomeMeta(e.outcome);
         const isFail = e.outcome === "failed";
         const isSkip = e.outcome.startsWith("skipped");

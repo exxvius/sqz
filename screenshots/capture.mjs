@@ -9,8 +9,12 @@ const OUT = "docs/images";
 
 const SHOTS = [
   { scene: "dashboard", theme: "dark", file: "dashboard-dark.png", nav: "Live", wait: ".live-card" },
+  // Live tab scrolled to the in-flight encodes (glowing progress bars mid-run).
+  { scene: "dashboard", theme: "dark", file: "live-encodes-dark.png", nav: "Live", wait: ".live-card", scrollTo: ".card.card-flat" },
   { scene: "history", theme: "dark", file: "history-dark.png", nav: "History", wait: ".kv-grid" },
   { scene: "home", theme: "dark", file: "home-dark.png", nav: null, addFiles: true, wait: ".queue-row" },
+  // Settings with a non-default accent to show the theming.
+  { scene: "home", theme: "dark", file: "settings-violet-dark.png", nav: "Settings", wait: ".card", accent: "violet" },
   { scene: "dashboard", theme: "light", file: "dashboard-light.png", nav: "Live", wait: ".live-card" },
 ];
 
@@ -24,8 +28,12 @@ const ctx = await browser.newContext({
 
 for (const s of SHOTS) {
   const page = await ctx.newPage();
+  // Inject the accent before the app boots (default emerald, isolating shots
+  // from each other in the shared context).
+  await page.addInitScript((a) => localStorage.setItem("sqz-accent", a), s.accent ?? "emerald");
+
   const url = `${BASE}?scene=${s.scene}&theme=${s.theme}`;
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "load", timeout: 20000 });
   await page.waitForFunction(() => window.sqz && window.sqz.ready);
   await page.evaluate(() => window.sqz.runScene());
 
@@ -33,7 +41,10 @@ for (const s of SHOTS) {
   if (s.addFiles) await page.getByRole("button", { name: "Add files", exact: true }).click();
 
   await page.waitForSelector(s.wait, { timeout: 8000 });
-  await page.waitForTimeout(600); // let bars/animations settle
+  if (s.scrollTo) {
+    await page.locator(s.scrollTo).first().scrollIntoViewIfNeeded();
+  }
+  await page.waitForTimeout(700); // let bars/animations settle
   await page.screenshot({ path: `${OUT}/${s.file}` });
   console.log(`✓ ${s.file}`);
   await page.close();

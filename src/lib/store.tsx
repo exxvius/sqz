@@ -67,7 +67,8 @@ type Action =
   | { type: "FILE_PROGRESS"; p: FileProgress }
   | { type: "FILE_END"; path: string }
   | { type: "RECORD"; result: ProcessResult }
-  | { type: "RUN_DONE"; summary: RunSummary };
+  | { type: "RUN_DONE"; summary: RunSummary }
+  | { type: "CLEAR_LOG" };
 
 const LOG_CAP = 1000;
 
@@ -194,6 +195,10 @@ function reducer(state: State, action: Action): State {
     }
     case "RUN_DONE":
       return { ...state, running: false, paused: false, summary: action.summary };
+    case "CLEAR_LOG":
+      // Visually clears the on-screen event log only — the manifest DB (History
+      // tab) is untouched.
+      return { ...state, log: [] };
     default:
       return state;
   }
@@ -207,6 +212,7 @@ interface StoreValue extends State {
   abortFile: (path: string) => Promise<void>;
   retryFile: (path: string) => Promise<void>;
   forceFile: (path: string) => Promise<void>;
+  clearLog: () => void;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -270,6 +276,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       abortFile: (path) => api.abortFile(path),
       retryFile: (path) => api.retryFile(path),
       forceFile: (path) => api.forceFile(path),
+      clearLog: () => dispatch({ type: "CLEAR_LOG" }),
     }),
     [state],
   );

@@ -1,6 +1,7 @@
+import type { CSSProperties } from "react";
 import { EventLog } from "../components/EventLog";
 import { LiveFiles } from "../components/LiveFiles";
-import { humanBytes, pct } from "../lib/format";
+import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
 
 export function DashboardView() {
@@ -36,16 +37,18 @@ export function DashboardView() {
                 {active.length > 0 && ` · ${active.length} active`}
               </span>
             </div>
-            <div className="bar tall">
-              <span
-                style={{
-                  width: pct(
+            <div
+              className="bar tall"
+              style={
+                {
+                  "--p":
                     store.queueTotal > 0
                       ? Math.min(session.processed / store.queueTotal, 1)
                       : 0,
-                  ),
-                }}
-              />
+                } as CSSProperties
+              }
+            >
+              <span />
             </div>
           </div>
         )}
@@ -85,13 +88,20 @@ export function DashboardView() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card card-flat">
         <div className="card-title">Active encodes</div>
         <LiveFiles active={active} minSavings={store.minSavings} onAbort={store.abortFile} />
       </div>
 
-      <div className="card">
-        <div className="card-title">Event log</div>
+      <div className="card card-flat">
+        <div className="card-head">
+          <div className="card-title">Event log</div>
+          {store.log.length > 0 && (
+            <button className="mini-btn" onClick={store.clearLog}>
+              Clear
+            </button>
+          )}
+        </div>
         <EventLog log={store.log} onRetry={store.retryFile} onForce={store.forceFile} />
       </div>
     </div>
