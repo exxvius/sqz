@@ -181,9 +181,8 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
       </div>
 
       <div className="card">
-        <Collapsible title="Advanced settings">
+        <Collapsible title="Output & format">
           <div className="adv-group">
-            <div className="adv-group-title">Output</div>
             <div className="field">
               <label>
                 Container
@@ -265,9 +264,12 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
               onChange={(normalize_container) => patch({ normalize_container })}
             />
           </div>
+        </Collapsible>
+      </div>
 
+      <div className="card">
+        <Collapsible title="Speed & efficiency">
           <div className="adv-group">
-            <div className="adv-group-title">Speed &amp; efficiency</div>
             <Switch
               label="Auto-detect parallel encodes"
               hint="Pick a sensible worker count from this machine's CPU cores."
@@ -368,9 +370,12 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
               onChange={(hwaccel_decode) => patch({ hwaccel_decode })}
             />
           </div>
+        </Collapsible>
+      </div>
 
+      <div className="card">
+        <Collapsible title="Safety & behavior">
           <div className="adv-group">
-            <div className="adv-group-title">Safety &amp; behavior</div>
             <div className="field">
               <label>
                 Verification depth

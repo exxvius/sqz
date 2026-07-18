@@ -391,6 +391,12 @@ impl From<HistoryFilter> for HistoryQuery {
 #[derive(Debug, Clone, Serialize)]
 pub struct History {
     pub total_reclaimed: i64,
+    /// Wall-clock seconds spent on real re-encodes.
+    pub encode_seconds: f64,
+    pub files_encoded: i64,
+    pub files_touched: i64,
+    pub bytes_in: i64,
+    pub bytes_out: i64,
     pub counts: HashMap<String, i64>,
     pub rows: Vec<HistoryRow>,
 }
@@ -403,8 +409,14 @@ pub async fn get_history(
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         let m = Manifest::open(&db).map_err(|e| e.to_string())?;
+        let s = m.stats().map_err(|e| e.to_string())?;
         Ok(History {
-            total_reclaimed: m.total_reclaimed().map_err(|e| e.to_string())?,
+            total_reclaimed: s.total_reclaimed,
+            encode_seconds: s.encode_seconds,
+            files_encoded: s.files_encoded,
+            files_touched: s.files_touched,
+            bytes_in: s.bytes_in,
+            bytes_out: s.bytes_out,
             counts: m.status_counts().map_err(|e| e.to_string())?,
             rows: m.history(&filter.into()).map_err(|e| e.to_string())?,
         })

@@ -2,17 +2,20 @@ import { useEffect, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { api } from "../lib/api";
+import { ACCENTS, type Accent } from "../lib/accent";
 import type { Theme } from "../lib/theme";
 import type { EnvInfo, FfStatus } from "../lib/types";
 
 interface Props {
   theme: Theme;
   toggleTheme: () => void;
+  accent: Accent;
+  setAccent: (a: Accent) => void;
   ff: FfStatus | null;
   refreshFf: () => void;
 }
 
-export function SettingsView({ theme, toggleTheme, ff, refreshFf }: Props) {
+export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props) {
   const [cleared, setCleared] = useState(false);
   const [env, setEnv] = useState<EnvInfo | null>(null);
   const [envLoading, setEnvLoading] = useState(false);
@@ -66,11 +69,28 @@ export function SettingsView({ theme, toggleTheme, ff, refreshFf }: Props) {
 
       <div className="card">
         <div className="card-title">Appearance</div>
-        <div className="field">
-          <label>Theme</label>
-          <button className="theme-toggle" onClick={toggleTheme}>
-            {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
-          </button>
+        <div className="field" style={{ alignItems: "flex-start" }}>
+          <label>
+            Accent color
+            <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+              Recolors backgrounds, buttons, and progress. Light/Dark is in the
+              sidebar. Currently {theme}.
+            </div>
+          </label>
+          <div className="accent-grid" role="radiogroup" aria-label="Accent color">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.id}
+                className={`accent-swatch${accent === a.id ? " selected" : ""}`}
+                style={{ background: a.swatch }}
+                role="radio"
+                aria-checked={accent === a.id}
+                aria-label={a.label}
+                title={a.label}
+                onClick={() => setAccent(a.id)}
+              />
+            ))}
+          </div>
         </div>
       </div>
 

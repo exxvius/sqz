@@ -40,6 +40,23 @@ export function fmtDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** Human duration for stats, e.g. "3h 12m", "45m 8s", "12s", "—". */
+export function fmtDurationLong(sec: number | null | undefined): string {
+  if (!sec || !isFinite(sec) || sec <= 0) return "—";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+/** Bytes-per-hour throughput as a human string, e.g. "4.2 GB/hr". */
+export function fmtRate(bytes: number, seconds: number): string {
+  if (!seconds || seconds <= 0 || bytes <= 0) return "—";
+  return `${humanBytes((bytes / seconds) * 3600)}/hr`;
+}
+
 export function relativeTime(unixSecs: number | null): string {
   if (!unixSecs) return "";
   const diff = Date.now() / 1000 - unixSecs;

@@ -35,6 +35,13 @@
   --bad: oklch(68% 0.2 25);
   --info: oklch(76% 0.12 210);
   --violet: oklch(74% 0.15 290);
+
+  /* Accent is derived from a single hue + chroma so the whole theme (background
+     tint, progress bar, buttons, glows) can be recolored by one attribute while
+     each mode keeps its own lightness. Status colors above are intentionally
+     independent of this. Default = teal. Overridden by [data-accent] presets. */
+  --accent-h: 195;
+  --accent-c: 0.13;
 }
 
 /* ---- Dark (primary) ---- */
@@ -50,10 +57,10 @@
   --text-dim: oklch(74% 0.012 240);
   --text-faint: oklch(60% 0.014 240);
 
-  --accent: oklch(80% 0.13 195);
-  --accent-2: oklch(72% 0.15 205);
-  --accent-quiet: oklch(80% 0.13 195 / 0.14);
-  --accent-ink: oklch(18% 0.04 220);
+  --accent: oklch(80% var(--accent-c) var(--accent-h));
+  --accent-2: oklch(72% calc(var(--accent-c) + 0.02) calc(var(--accent-h) + 10));
+  --accent-quiet: oklch(80% var(--accent-c) var(--accent-h) / 0.14);
+  --accent-ink: oklch(18% 0.04 calc(var(--accent-h) + 25));
 
   --border: oklch(100% 0 0 / 0.08);
   --border-strong: oklch(100% 0 0 / 0.16);
@@ -70,8 +77,12 @@
   --glass-shadow: 0 22px 48px -28px oklch(0% 0 0 / 0.8);
   --blur: blur(16px) saturate(1.2);
 
-  --accent-grad: linear-gradient(180deg, oklch(85% 0.13 195), oklch(68% 0.16 205));
-  --accent-glow: 0 10px 28px -8px oklch(72% 0.15 200 / 0.55),
+  --accent-grad: linear-gradient(
+    180deg,
+    oklch(85% var(--accent-c) var(--accent-h)),
+    oklch(68% calc(var(--accent-c) + 0.03) calc(var(--accent-h) + 10))
+  );
+  --accent-glow: 0 10px 28px -8px oklch(72% calc(var(--accent-c) + 0.02) calc(var(--accent-h) + 5) / 0.55),
     inset 0 1px 0 oklch(100% 0 0 / 0.35);
 
   --shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 14px 34px -18px oklch(0% 0 0 / 0.55);
@@ -89,10 +100,10 @@
     --text: oklch(24% 0.02 250);
     --text-dim: oklch(44% 0.015 250);
     --text-faint: oklch(56% 0.014 250);
-    --accent: oklch(58% 0.13 200);
-    --accent-2: oklch(52% 0.14 210);
-    --accent-quiet: oklch(58% 0.13 200 / 0.12);
-    --accent-ink: oklch(99% 0.01 200);
+    --accent: oklch(58% var(--accent-c) var(--accent-h));
+    --accent-2: oklch(52% calc(var(--accent-c) + 0.01) calc(var(--accent-h) + 10));
+    --accent-quiet: oklch(58% var(--accent-c) var(--accent-h) / 0.12);
+    --accent-ink: oklch(99% 0.01 var(--accent-h));
     --border: oklch(0% 0 0 / 0.1);
     --border-strong: oklch(0% 0 0 / 0.18);
     --glass-bg: linear-gradient(160deg, oklch(100% 0 0 / 0.85), oklch(100% 0 0 / 0.6));
@@ -100,8 +111,12 @@
     --glass-highlight: inset 0 1px 0 oklch(100% 0 0 / 0.7);
     --glass-shadow: 0 16px 34px -22px oklch(0% 0 0 / 0.22);
     --blur: blur(14px) saturate(1.1);
-    --accent-grad: linear-gradient(180deg, oklch(64% 0.13 200), oklch(52% 0.14 210));
-    --accent-glow: 0 10px 24px -10px oklch(58% 0.13 205 / 0.5),
+    --accent-grad: linear-gradient(
+      180deg,
+      oklch(64% var(--accent-c) var(--accent-h)),
+      oklch(52% calc(var(--accent-c) + 0.01) calc(var(--accent-h) + 10))
+    );
+    --accent-glow: 0 10px 24px -10px oklch(58% var(--accent-c) calc(var(--accent-h) + 5) / 0.5),
       inset 0 1px 0 oklch(100% 0 0 / 0.4);
     --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 14px 30px -18px oklch(0% 0 0 / 0.14);
     color-scheme: light;
@@ -117,10 +132,10 @@
   --text: oklch(24% 0.02 250);
   --text-dim: oklch(44% 0.015 250);
   --text-faint: oklch(56% 0.014 250);
-  --accent: oklch(58% 0.13 200);
-  --accent-2: oklch(52% 0.14 210);
-  --accent-quiet: oklch(58% 0.13 200 / 0.12);
-  --accent-ink: oklch(99% 0.01 200);
+  --accent: oklch(58% var(--accent-c) var(--accent-h));
+  --accent-2: oklch(52% calc(var(--accent-c) + 0.01) calc(var(--accent-h) + 10));
+  --accent-quiet: oklch(58% var(--accent-c) var(--accent-h) / 0.12);
+  --accent-ink: oklch(99% 0.01 var(--accent-h));
   --border: oklch(0% 0 0 / 0.1);
   --border-strong: oklch(0% 0 0 / 0.18);
   --glass-bg: linear-gradient(160deg, oklch(100% 0 0 / 0.85), oklch(100% 0 0 / 0.6));
@@ -128,9 +143,25 @@
   --glass-highlight: inset 0 1px 0 oklch(100% 0 0 / 0.7);
   --glass-shadow: 0 16px 34px -22px oklch(0% 0 0 / 0.22);
   --blur: blur(14px) saturate(1.1);
-  --accent-grad: linear-gradient(180deg, oklch(64% 0.13 200), oklch(52% 0.14 210));
-  --accent-glow: 0 10px 24px -10px oklch(58% 0.13 205 / 0.5),
+  --accent-grad: linear-gradient(
+    180deg,
+    oklch(64% var(--accent-c) var(--accent-h)),
+    oklch(52% calc(var(--accent-c) + 0.01) calc(var(--accent-h) + 10))
+  );
+  --accent-glow: 0 10px 24px -10px oklch(58% var(--accent-c) calc(var(--accent-h) + 5) / 0.5),
     inset 0 1px 0 oklch(100% 0 0 / 0.4);
   --shadow: 0 1px 2px oklch(0% 0 0 / 0.08), 0 14px 30px -18px oklch(0% 0 0 / 0.14);
   color-scheme: light;
 }
+
+/* ---- Accent presets — recolor the whole theme from one attribute. Each sets
+   only hue + chroma; both light and dark derive their accent from these, and the
+   status colors (--ok/--warn/--bad/--info) stay independent. ---- */
+:root[data-accent="teal"] { --accent-h: 195; --accent-c: 0.13; }
+:root[data-accent="sky"] { --accent-h: 230; --accent-c: 0.13; }
+:root[data-accent="blue"] { --accent-h: 255; --accent-c: 0.15; }
+:root[data-accent="violet"] { --accent-h: 292; --accent-c: 0.15; }
+:root[data-accent="magenta"] { --accent-h: 330; --accent-c: 0.15; }
+:root[data-accent="rose"] { --accent-h: 15; --accent-c: 0.16; }
+:root[data-accent="amber"] { --accent-h: 70; --accent-c: 0.14; }
+:root[data-accent="green"] { --accent-h: 150; --accent-c: 0.15; }

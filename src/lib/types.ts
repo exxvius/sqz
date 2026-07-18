@@ -152,6 +152,11 @@ export interface HistoryFilter {
 
 export interface History {
   total_reclaimed: number;
+  encode_seconds: number;
+  files_encoded: number;
+  files_touched: number;
+  bytes_in: number;
+  bytes_out: number;
   counts: Record<string, number>;
   rows: HistoryRow[];
 }

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS files (
     saved_bytes INTEGER,
     error       TEXT,
     updated_at  REAL,
-    forced      INTEGER DEFAULT 0
+    forced      INTEGER DEFAULT 0,
+    encode_ms   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -44,6 +45,8 @@ pub struct StatusUpdate {
     pub out_size: Option<u64>,
     pub saved_bytes: Option<i64>,
     pub error: Option<String>,
+    /// Wall-clock encode time in milliseconds (only set on a real re-encode).
+    pub encode_ms: Option<i64>,
 }
 
 /// A file row for the UI history view (any status).
@@ -97,8 +100,9 @@ impl Manifest {
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
         )?;
         conn.execute_batch(SCHEMA)?;
-        // Migration for manifests created before per-file force existed.
+        // Migrations for manifests created before newer columns existed.
         let _ = conn.execute("ALTER TABLE files ADD COLUMN forced INTEGER DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN encode_ms INTEGER", []);
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -150,8 +154,8 @@ impl Manifest {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE files SET status=?1, src_codec=COALESCE(?2, src_codec), \
-             height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, updated_at=?7 \
-             WHERE path=?8",
+             height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, \
+             encode_ms=COALESCE(?7, encode_ms), updated_at=?8 WHERE path=?9",
             params![
                 status,
                 upd.src_codec,
@@ -159,6 +163,7 @@ impl Manifest {
                 upd.out_size.map(|v| v as i64),
                 upd.saved_bytes,
                 upd.error,
+                upd.encode_ms,
                 now(),
                 path,
             ],
@@ -256,6 +261,35 @@ impl Manifest {
         )
     }
 
+    /// Aggregate all-time statistics for the History dashboard.
+    pub fn stats(&self) -> rusqlite::Result<Stats> {
+        let conn = self.conn.lock().unwrap();
+        let total_reclaimed: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(saved_bytes), 0) FROM files WHERE saved_bytes > 0",
+            [],
+            |r| r.get(0),
+        )?;
+        // Re-encode-only aggregates (status=done): time, throughput, ratio.
+        let (encode_ms, files_encoded, bytes_in, bytes_out): (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT COALESCE(SUM(encode_ms), 0), COUNT(*), \
+                 COALESCE(SUM(size), 0), COALESCE(SUM(out_size), 0) \
+                 FROM files WHERE status=?1",
+                params![STATUS_DONE],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+        let files_touched: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+        Ok(Stats {
+            total_reclaimed,
+            encode_seconds: encode_ms as f64 / 1000.0,
+            files_encoded,
+            files_touched,
+            bytes_in,
+            bytes_out,
+        })
+    }
+
     /// Query history rows with optional status filter + path search, paged.
     pub fn history(&self, q: &HistoryQuery) -> rusqlite::Result<Vec<HistoryRow>> {
         use rusqlite::types::Value;
@@ -339,6 +373,23 @@ pub struct ClaimedFile {
     pub forced: bool,
 }
 
+/// All-time aggregate statistics for the History dashboard.
+#[derive(Debug, Clone, Serialize)]
+pub struct Stats {
+    /// Total bytes reclaimed across every space-saving outcome.
+    pub total_reclaimed: i64,
+    /// Wall-clock seconds spent on real re-encodes (status=done).
+    pub encode_seconds: f64,
+    /// Number of files re-encoded.
+    pub files_encoded: i64,
+    /// Number of files ever recorded (any status).
+    pub files_touched: i64,
+    /// Sum of source bytes for re-encoded files.
+    pub bytes_in: i64,
+    /// Sum of output bytes for re-encoded files.
+    pub bytes_out: i64,
+}
+
 fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
     Ok(HistoryRow {
         path: r.get(0)?,
@@ -399,6 +450,34 @@ mod tests {
         // Same size/mtime, no force → stays done.
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
         assert!(m.pending_paths().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stats_aggregate_encode_time_and_ratio() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        m.set_status(
+            "/a.mkv",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_size: Some(40),
+                saved_bytes: Some(60),
+                encode_ms: Some(2_000),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        m.upsert_scanned("/b.mkv", 200, 1.0, false, true).unwrap();
+        m.set_status("/b.mkv", STATUS_SKIPPED_EFFICIENT, &StatusUpdate::default())
+            .unwrap();
+
+        let s = m.stats().unwrap();
+        assert_eq!(s.total_reclaimed, 60);
+        assert_eq!(s.files_encoded, 1); // only the done file
+        assert_eq!(s.files_touched, 2);
+        assert_eq!(s.bytes_in, 100);
+        assert_eq!(s.bytes_out, 40);
+        assert!((s.encode_seconds - 2.0).abs() < 1e-9);
     }
 
     #[test]

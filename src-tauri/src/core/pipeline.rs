@@ -274,7 +274,9 @@ pub fn process_file(
     reporter.on_file_start(path_str, &name, info.duration, size);
 
     let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
+    let encode_start = std::time::Instant::now();
     let enc = run_encode(&ff.ffmpeg, &args, &cancelled, &mut on_progress, Some(&abort_pred));
+    let encode_ms = encode_start.elapsed().as_millis() as i64;
     reporter.on_file_end(path_str);
 
     if enc.cancelled {
@@ -361,6 +363,7 @@ pub fn process_file(
     set(manifest, path_str, Outcome::Done, StatusUpdate {
         out_size: Some(vr.out_size),
         saved_bytes: Some(saved),
+        encode_ms: Some(encode_ms),
         ..meta_upd(&info)
     });
 

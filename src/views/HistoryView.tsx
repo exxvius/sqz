@@ -3,7 +3,16 @@ import { confirm, message, save } from "@tauri-apps/plugin-dialog";
 import { StatusCard } from "../components/StatusCard";
 import { FolderIcon, PlayIcon } from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
-import { currentPath, fileName, humanBytes, relativeTime } from "../lib/format";
+import {
+  currentPath,
+  fileName,
+  fmtDuration,
+  fmtDurationLong,
+  fmtRate,
+  humanBytes,
+  pct,
+  relativeTime,
+} from "../lib/format";
 import { forceable, retryable, statusMeta } from "../lib/status";
 import { useStore } from "../lib/store";
 import type { History, Status } from "../lib/types";
@@ -126,6 +135,42 @@ export function HistoryView() {
           <span className="num">{humanBytes(history?.total_reclaimed ?? 0)}</span>
           <span className="muted">reclaimed all-time</span>
         </div>
+        {history && (
+          <div className="stat-row">
+            <div className="stat">
+              <span className="v">{fmtDurationLong(history.encode_seconds)}</span>
+              <span className="k">Time encoding</span>
+            </div>
+            <div className="stat">
+              <span className="v">{fmtRate(history.total_reclaimed, history.encode_seconds)}</span>
+              <span className="k">Efficiency</span>
+            </div>
+            <div className="stat">
+              <span className="v">
+                {history.bytes_in > 0
+                  ? pct(1 - history.bytes_out / history.bytes_in)
+                  : "—"}
+              </span>
+              <span className="k">Avg reduction</span>
+            </div>
+            <div className="stat">
+              <span className="v">{history.files_encoded.toLocaleString()}</span>
+              <span className="k">Re-encoded</span>
+            </div>
+            <div className="stat">
+              <span className="v">
+                {history.files_encoded > 0
+                  ? fmtDuration(history.encode_seconds / history.files_encoded)
+                  : "—"}
+              </span>
+              <span className="k">Avg / file</span>
+            </div>
+            <div className="stat">
+              <span className="v">{history.files_touched.toLocaleString()}</span>
+              <span className="k">Files tracked</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card">

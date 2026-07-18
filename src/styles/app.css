@@ -34,7 +34,7 @@
   background: linear-gradient(
     100deg,
     var(--accent) 20%,
-    oklch(96% 0.06 168) 50%,
+    oklch(96% 0.06 calc(var(--accent-h) - 27)) 50%,
     var(--accent) 80%
   );
   background-size: 220% 100%;
@@ -200,7 +200,7 @@
   border-color: var(--accent);
   background: linear-gradient(160deg, var(--accent-quiet), transparent 70%), var(--glass-bg);
   box-shadow: var(--glass-highlight), 0 0 0 1px var(--accent-quiet),
-    0 18px 40px -20px oklch(70% 0.15 200 / 0.4);
+    0 18px 40px -20px oklch(70% 0.15 var(--accent-h) / 0.4);
   color: var(--text);
 }
 .dropzone .big {
@@ -560,7 +560,7 @@
   font-size: var(--text-2xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(180deg, oklch(92% 0.08 195), var(--accent));
+  background: linear-gradient(180deg, oklch(92% 0.08 var(--accent-h)), var(--accent));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -932,6 +932,30 @@
 .theme-toggle:hover {
   border-color: var(--border-strong);
   color: var(--text);
+}
+
+/* ---- Accent color picker (Settings → Appearance) ---- */
+.accent-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.accent-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--border-strong), var(--glass-highlight);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
+}
+.accent-swatch:hover {
+  transform: scale(1.12);
+}
+.accent-swatch.selected {
+  border-color: var(--bg);
+  box-shadow: 0 0 0 2px var(--accent), var(--accent-glow);
 }
 
 /* ---- Tone helpers ---- */

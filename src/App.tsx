@@ -9,6 +9,7 @@ import { defaultConfig, fromPersisted, persistable } from "./lib/config";
 import { HistoryIcon, HomeIcon, LiveIcon, Logo, SettingsIcon } from "./components/icons";
 import { StoreProvider, useStore } from "./lib/store";
 import { useTheme } from "./lib/theme";
+import { useAccent } from "./lib/accent";
 import type { FfStatus, RunConfig } from "./lib/types";
 import type { ComponentType } from "react";
 
@@ -24,6 +25,7 @@ const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[]
 function Shell() {
   const store = useStore();
   const [theme, toggleTheme] = useTheme();
+  const [accent, setAccent] = useAccent();
   const [view, setView] = useState<View>("home");
   const [config, setConfig] = useState<RunConfig>(defaultConfig);
   const [showOnboarding, setShowOnboarding] = useState(
@@ -77,9 +79,18 @@ function Shell() {
       case "history":
         return <HistoryView />;
       case "settings":
-        return <SettingsView theme={theme} toggleTheme={toggleTheme} ff={ff} refreshFf={refreshFf} />;
+        return (
+          <SettingsView
+            theme={theme}
+            toggleTheme={toggleTheme}
+            accent={accent}
+            setAccent={setAccent}
+            ff={ff}
+            refreshFf={refreshFf}
+          />
+        );
     }
-  }, [view, config, theme, toggleTheme, ff, refreshFf]);
+  }, [view, config, theme, toggleTheme, accent, setAccent, ff, refreshFf]);
 
   return (
     <div className="app">
