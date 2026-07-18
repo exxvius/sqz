@@ -61,7 +61,7 @@ jobs:
         with:
           args: --target ${{ matrix.triple }}
           tagName: ${{ github.ref_name }}
-          releaseName: "sqz ${{ github.ref_name }}"
+          releaseName: "${{ github.ref_name }}"
           releaseBody: "Tiny sqz installers. FFmpeg is downloaded on first run (or bring your own). See NOTICE for licensing."
           releaseDraft: true
           prerelease: false

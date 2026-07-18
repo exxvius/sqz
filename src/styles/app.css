@@ -27,7 +27,20 @@
   font-weight: 700;
   font-size: 1.7rem;
   letter-spacing: -0.02em;
-  color: var(--text);
+  background: linear-gradient(180deg, oklch(92% 0.09 var(--accent-h)), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: wordmark-glow 4.5s ease-in-out infinite;
+}
+@keyframes wordmark-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px color-mix(in oklab, var(--accent) 22%, transparent));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px color-mix(in oklab, var(--accent) 60%, transparent));
+  }
 }
 /* When a run is processing, the Live menu item shimmers instead of a dot. */
 .nav-item.processing .grow {
@@ -391,8 +404,9 @@
   color: var(--text-dim);
 }
 .pill.hw {
-  color: var(--ok);
-  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
 }
 .pill.cpu {
   color: var(--warn);
@@ -445,8 +459,8 @@
   border: 1px solid var(--border);
 }
 .mc-badge.hw {
-  color: var(--ok);
-  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
 }
 .mc-badge.cpu {
   color: var(--warn);
@@ -460,8 +474,8 @@
   border: 1px solid var(--border);
 }
 .hw-note.ok {
-  background: color-mix(in oklab, var(--ok) 8%, transparent);
-  border-color: color-mix(in oklab, var(--ok) 30%, transparent);
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 32%, transparent);
 }
 .hw-note.warn {
   background: color-mix(in oklab, var(--warn) 8%, transparent);
@@ -935,27 +949,17 @@
 }
 
 /* ---- Accent color picker (Settings → Appearance) ---- */
-.accent-grid {
-  display: flex;
-  flex-wrap: wrap;
+.accent-option {
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-2);
 }
-.accent-swatch {
-  width: 26px;
-  height: 26px;
+.accent-dot {
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  border: 2px solid transparent;
-  box-shadow: 0 0 0 1px var(--border-strong), var(--glass-highlight);
-  cursor: pointer;
-  transition: transform var(--duration-fast) var(--ease),
-    box-shadow var(--duration-fast) var(--ease);
-}
-.accent-swatch:hover {
-  transform: scale(1.12);
-}
-.accent-swatch.selected {
-  border-color: var(--bg);
-  box-shadow: 0 0 0 2px var(--accent), var(--accent-glow);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  flex: none;
 }
 
 /* ---- Tone helpers ---- */

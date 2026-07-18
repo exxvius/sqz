@@ -30,6 +30,11 @@ const DETECTION = {
 
 const HISTORY = {
   total_reclaimed: Math.round(419.7 * GB),
+  encode_seconds: 235800, // ~65h 30m
+  files_encoded: 214,
+  files_touched: 317,
+  bytes_in: Math.round(723.6 * GB),
+  bytes_out: Math.round(303.9 * GB),
   counts: {
     done: 214,
     normalized: 12,

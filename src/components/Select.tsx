@@ -44,16 +44,20 @@ export function Select({ value, options, onChange, ariaLabel }: Props) {
       close();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    // Scrolling the page (the main region) dismisses the menu so it never floats
+    // detached from its trigger — but scrolling *inside* the menu must not.
+    const onScroll = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      close();
+    };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
-    // Any scroll (the main region scrolls) or resize dismisses the menu so it
-    // never floats detached from its trigger.
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
     };
   }, [open]);

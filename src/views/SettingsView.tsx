@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { FfmpegSetup } from "../components/FfmpegSetup";
+import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { ACCENTS, type Accent } from "../lib/accent";
 import type { Theme } from "../lib/theme";
@@ -69,7 +70,7 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
 
       <div className="card">
         <div className="card-title">Appearance</div>
-        <div className="field" style={{ alignItems: "flex-start" }}>
+        <div className="field">
           <label>
             Accent color
             <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
@@ -77,20 +78,20 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
               sidebar. Currently {theme}.
             </div>
           </label>
-          <div className="accent-grid" role="radiogroup" aria-label="Accent color">
-            {ACCENTS.map((a) => (
-              <button
-                key={a.id}
-                className={`accent-swatch${accent === a.id ? " selected" : ""}`}
-                style={{ background: a.swatch }}
-                role="radio"
-                aria-checked={accent === a.id}
-                aria-label={a.label}
-                title={a.label}
-                onClick={() => setAccent(a.id)}
-              />
-            ))}
-          </div>
+          <Select
+            value={accent}
+            ariaLabel="Accent color"
+            onChange={(v) => setAccent(v as Accent)}
+            options={ACCENTS.map((a) => ({
+              value: a.id,
+              label: (
+                <span className="accent-option">
+                  <span className="accent-dot" style={{ background: a.swatch }} />
+                  {a.label}
+                </span>
+              ),
+            }))}
+          />
         </div>
       </div>
 
