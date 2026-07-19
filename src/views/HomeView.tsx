@@ -9,6 +9,7 @@ import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
+import { useLock } from "../lib/lock";
 import type {
   AudioMode,
   Container,
@@ -16,6 +17,7 @@ import type {
   OnSuccess,
   Order,
   RunConfig,
+  ScaleFilter,
   ScanResult,
   VerifyDepth,
 } from "../lib/types";
@@ -52,6 +54,13 @@ const VERIFY_OPTIONS: { value: VerifyDepth; label: string }[] = [
   { value: "checksummed", label: "Checksummed (all streams)" },
 ];
 
+const SCALE_OPTIONS: { value: ScaleFilter; label: string }[] = [
+  { value: "lanczos", label: "Lanczos (sharpest, default)" },
+  { value: "bicubic", label: "Bicubic (sharp)" },
+  { value: "bilinear", label: "Bilinear (soft, no ringing)" },
+  { value: "area", label: "Area (no ringing, preserves edges)" },
+];
+
 const ORDER_OPTIONS: { value: Order; label: string }[] = [
   { value: "smart", label: "Smart (resume order)" },
   { value: "largest-first", label: "Largest first" },
@@ -62,6 +71,7 @@ const ORDER_OPTIONS: { value: Order; label: string }[] = [
 
 export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Props) {
   const store = useStore();
+  const { locked, maskPath } = useLock();
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
@@ -100,8 +110,9 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
       <div className="view-head">
         <h2>Squeeze your library</h2>
         <p>
-          Add videos or whole folders. sqz re-encodes each one and only replaces the original after
-          verifying the result is playable, complete, and smaller.
+          {locked
+            ? "The app is locked — read-only until you unlock it from the sidebar."
+            : "Add videos or whole folders. sqz re-encodes each one and only replaces the original after verifying the result is playable, complete, and smaller."}
         </p>
       </div>
 
@@ -118,7 +129,10 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
         </div>
       )}
 
-      <DropZone onAdd={addInputs} />
+      {/* Everything below is disabled as a unit when the app is locked — a
+          disabled fieldset natively disables every control inside it. */}
+      <fieldset className="lock-fence" disabled={locked}>
+      <DropZone onAdd={addInputs} disabled={locked} />
 
       {config.inputs.length > 0 && (
         <div className="card" style={{ marginTop: "var(--space-4)" }}>
@@ -133,8 +147,8 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
           <div className="queue" style={{ marginTop: "var(--space-3)" }}>
             {config.inputs.map((p) => (
               <div className="queue-row" key={p}>
-                <span className="path" title={p}>
-                  {p}
+                <span className="path" title={locked ? maskPath(p) : p}>
+                  {maskPath(p)}
                 </span>
                 <button className="rm" onClick={() => removeInput(p)} aria-label="Remove">
                   ✕
@@ -234,6 +248,22 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
               step={120}
               onChange={(max_height) => patch({ max_height })}
             />
+            <div className="field">
+              <label>
+                Downscale filter
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  Only used when a source is taller than the max height. Lanczos is
+                  sharpest but rings at high-contrast edges; Area avoids ringing and
+                  keeps hard edges clean.
+                </div>
+              </label>
+              <Select
+                value={config.scale_filter}
+                options={SCALE_OPTIONS}
+                ariaLabel="Downscale filter"
+                onChange={(v) => patch({ scale_filter: v as ScaleFilter })}
+              />
+            </div>
             <NumberField
               label="Required savings (%)"
               value={Math.round(config.min_savings * 100)}
@@ -444,6 +474,7 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
           </div>
         </Collapsible>
       </div>
+      </fieldset>
 
       <div className="actionbar">
         <div>
@@ -459,7 +490,7 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
           )}
         </div>
         <div className="spacer" />
-        <button className="btn primary lg" disabled={!canStart} onClick={start}>
+        <button className="btn primary lg" disabled={!canStart || locked} onClick={start}>
           {config.dry_run ? "Preview run" : "Start squeezing"}
         </button>
       </div>

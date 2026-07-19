@@ -11,6 +11,7 @@ export type EncoderFamily = "nvenc" | "amf" | "qsv" | "videotoolbox" | "software
 export type Container = "mkv" | "mp4";
 export type AudioMode = "copy" | "opus" | "aac";
 export type VerifyDepth = "fast" | "thorough" | "checksummed";
+export type ScaleFilter = "lanczos" | "bicubic" | "bilinear" | "area";
 export type Order =
   | "smart"
   | "largest-first"
@@ -62,6 +63,7 @@ export interface RunConfig {
   workers: number;
   min_savings: number;
   max_height: number;
+  scale_filter: ScaleFilter;
   on_success: OnSuccess;
   holding_dir?: string | null;
   holding_retention_days: number;
@@ -178,6 +180,13 @@ export interface FileProgress {
 }
 export interface FileEnd {
   path: string;
+}
+
+export interface LockStatus {
+  /** A password has been set up at least once. */
+  configured: boolean;
+  /** The app is currently locked (masked + read-only). */
+  locked: boolean;
 }
 
 export interface EnvInfo {

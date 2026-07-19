@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { FfmpegSetup } from "../components/FfmpegSetup";
+import { PasswordModal } from "../components/PasswordModal";
+import { useConfirm } from "../components/ConfirmModal";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { ACCENTS, type Accent } from "../lib/accent";
+import { useLock } from "../lib/lock";
+import type { CloseBehavior } from "../lib/closeBehavior";
 import type { Theme } from "../lib/theme";
 import type { EnvInfo, FfStatus } from "../lib/types";
 
@@ -12,15 +16,33 @@ interface Props {
   toggleTheme: () => void;
   accent: Accent;
   setAccent: (a: Accent) => void;
+  closeBehavior: CloseBehavior;
+  setCloseBehavior: (b: CloseBehavior) => void;
   ff: FfStatus | null;
   refreshFf: () => void;
 }
 
-export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props) {
+const CLOSE_OPTIONS: { id: CloseBehavior; label: string }[] = [
+  { id: "quit", label: "Quit" },
+  { id: "tray", label: "Minimize to tray" },
+];
+
+export function SettingsView({
+  theme,
+  accent,
+  setAccent,
+  closeBehavior,
+  setCloseBehavior,
+  ff,
+  refreshFf,
+}: Props) {
+  const lock = useLock();
+  const { confirm, element: confirmModal } = useConfirm();
   const [cleared, setCleared] = useState(false);
   const [env, setEnv] = useState<EnvInfo | null>(null);
   const [envLoading, setEnvLoading] = useState(false);
   const [configMsg, setConfigMsg] = useState<string | null>(null);
+  const [changePw, setChangePw] = useState(false);
 
   const loadEnv = () => {
     setEnvLoading(true);
@@ -81,6 +103,7 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
           <Select
             value={accent}
             ariaLabel="Accent color"
+            disabled={lock.locked}
             onChange={(v) => setAccent(v as Accent)}
             options={ACCENTS.map((a) => ({
               value: a.id,
@@ -96,6 +119,56 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
       </div>
 
       <div className="card">
+        <div className="card-title">When closing the window</div>
+        <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>
+          Choose what the window's close button does. Minimizing keeps sqz running in the
+          system tray so encodes continue in the background.
+        </p>
+        <div className="seg" role="group" aria-label="Close behavior">
+          {CLOSE_OPTIONS.map((o) => (
+            <button
+              key={o.id}
+              aria-pressed={closeBehavior === o.id}
+              disabled={lock.locked}
+              onClick={() => setCloseBehavior(o.id)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Lock</div>
+        <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>
+          Locking hides file names and paths across the app and makes it read-only —
+          no run control, settings changes, or edits — useful when the machine is left
+          encoding unattended. Toggle it from the lock button in the sidebar. It's
+          currently{" "}
+          <strong>{lock.locked ? "locked" : lock.configured ? "unlocked" : "not set up"}</strong>.
+        </p>
+        <button
+          className="btn"
+          onClick={() => setChangePw(true)}
+          disabled={!lock.configured || lock.locked}
+          title={
+            lock.locked
+              ? "Unlock the app before changing the password"
+              : !lock.configured
+                ? "Set up a lock password from the sidebar first"
+                : undefined
+          }
+        >
+          Change password
+        </button>
+        {lock.locked && (
+          <p className="muted" style={{ marginTop: "var(--space-2)" }}>
+            Editing and the password are locked until you unlock the app.
+          </p>
+        )}
+      </div>
+
+      <div className="card">
         <div className="card-title">FFmpeg</div>
         <FfmpegSetup ff={ff} onChange={refreshFf} />
       </div>
@@ -108,11 +181,16 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
         </p>
         <button
           className="btn danger"
+          disabled={lock.locked}
+          title={lock.locked ? "Disabled while the app is locked" : undefined}
           onClick={async () => {
-            const ok = await confirm(
-              "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
-              { title: "Clear history", kind: "warning", okLabel: "Clear all", cancelLabel: "Cancel" },
-            );
+            const ok = await confirm({
+              title: "Clear history",
+              message:
+                "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
+              confirmLabel: "Clear all",
+              danger: true,
+            });
             if (!ok) return;
             await api.clearHistory();
             setCleared(true);
@@ -132,7 +210,7 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
           <div className="card-title" style={{ margin: 0 }}>
             Environment
           </div>
-          <button className="btn ghost" onClick={loadEnv} disabled={envLoading}>
+          <button className="btn ghost" onClick={loadEnv} disabled={envLoading || lock.locked}>
             {envLoading ? "Checking…" : "Re-check"}
           </button>
         </div>
@@ -151,7 +229,14 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
             <dt>Locale</dt>
             <dd>{env.locale}</dd>
             <dt>FFmpeg</dt>
-            <dd>{env.ffmpeg_version ?? (env.ffmpeg_present ? env.ffmpeg_path : "not set up")}</dd>
+            <dd>
+              {env.ffmpeg_version ??
+                (env.ffmpeg_present
+                  ? lock.locked
+                    ? "•••••••••"
+                    : env.ffmpeg_path
+                  : "not set up")}
+            </dd>
             <dt>Hardware encoders</dt>
             <dd>{hw && hw.length > 0 ? hw.join(", ") : "none detected (CPU fallback)"}</dd>
           </dl>
@@ -167,13 +252,18 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
           replaces the current settings and reloads the app.
         </p>
         <div className="row" style={{ gap: "var(--space-2)" }}>
-          <button className="btn" onClick={exportConfig}>
+          <button className="btn" onClick={exportConfig} disabled={lock.locked}>
             Export settings
           </button>
-          <button className="btn" onClick={importConfig}>
+          <button className="btn" onClick={importConfig} disabled={lock.locked}>
             Import settings
           </button>
         </div>
+        {lock.locked && (
+          <p className="muted" style={{ marginTop: "var(--space-2)" }}>
+            Import and export are disabled while the app is locked.
+          </p>
+        )}
         {configMsg && (
           <p className="muted" style={{ marginTop: "var(--space-2)" }}>
             {configMsg}
@@ -189,6 +279,18 @@ export function SettingsView({ theme, accent, setAccent, ff, refreshFf }: Props)
           the FFmpeg project.
         </p>
       </div>
+
+      {changePw && (
+        <PasswordModal
+          mode="change"
+          onSubmit={async (v) => {
+            await lock.changePassword(v.oldPassword ?? "", v.newPassword ?? "");
+            setChangePw(false);
+          }}
+          onClose={() => setChangePw(false)}
+        />
+      )}
+      {confirmModal}
     </div>
   );
 }

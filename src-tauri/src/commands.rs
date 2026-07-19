@@ -14,6 +14,7 @@ use crate::core::config::{Config, OnSuccess, HOLDING_DIRNAME};
 use crate::core::discover::discover;
 use crate::core::encoders::{self, Detection};
 use crate::core::ffbin::FfBin;
+use crate::core::lock::Lock;
 use crate::core::manifest::{HistoryQuery, HistoryRow, Manifest};
 use crate::core::paths::holding_path_for;
 use crate::core::util::command_no_window;
@@ -34,16 +35,20 @@ pub struct AppState {
     pub run: Mutex<Option<RunControl>>,
     /// Cancel tokens for files currently being processed (for per-file abort).
     pub active: ActiveMap,
+    /// Password-gated lock: masks personal info and makes the app read-only.
+    pub lock: Lock,
 }
 
 impl AppState {
     pub fn new(data_dir: PathBuf) -> Self {
         let ff = crate::ffsetup::current(&data_dir);
+        let lock = Lock::load(&data_dir);
         Self {
             data_dir,
             ff: Mutex::new(ff),
             run: Mutex::new(None),
             active: Arc::new(Mutex::new(HashMap::new())),
+            lock,
         }
     }
 
@@ -62,6 +67,52 @@ impl AppState {
     fn settings_path(&self) -> PathBuf {
         self.data_dir.join("settings.json")
     }
+}
+
+/// Reject an action that must not run while the app is locked. This is the real
+/// gate — the UI disables these controls too, but that guard is cosmetic and
+/// trivially bypassed over the IPC boundary.
+fn guard_locked(state: &AppState) -> Result<(), String> {
+    if state.lock.is_locked() {
+        return Err("This action is disabled while the app is locked.".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LockStatus {
+    pub configured: bool,
+    pub locked: bool,
+}
+
+#[tauri::command]
+pub fn lock_status(state: State<'_, AppState>) -> LockStatus {
+    let (configured, locked) = state.lock.status();
+    LockStatus { configured, locked }
+}
+
+#[tauri::command]
+pub fn lock_setup(password: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.lock.setup(&password)
+}
+
+#[tauri::command]
+pub fn lock_app(state: State<'_, AppState>) -> Result<(), String> {
+    state.lock.engage()
+}
+
+#[tauri::command]
+pub fn unlock_app(password: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.lock.release(&password)
+}
+
+#[tauri::command]
+pub fn lock_change_password(
+    old_password: String,
+    new_password: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.lock.change_password(&old_password, &new_password)
 }
 
 const VALIDATE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -118,6 +169,7 @@ pub async fn set_ffmpeg_paths(
     ffprobe: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    guard_locked(&state)?;
     let data_dir = state.data_dir.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
         crate::ffsetup::set_custom(&data_dir, &ffmpeg, &ffprobe)
@@ -132,6 +184,7 @@ pub async fn set_ffmpeg_paths(
 /// Forget custom binary paths (revert to managed / PATH resolution).
 #[tauri::command]
 pub fn clear_ffmpeg_override(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     crate::ffsetup::clear_custom(&state.data_dir)?;
     state.refresh_ff();
     Ok(())
@@ -139,13 +192,15 @@ pub fn clear_ffmpeg_override(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Open a file with the OS default application.
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
+pub fn open_path(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     opener::open(&path).map_err(|e| e.to_string())
 }
 
 /// Reveal a file in the OS file manager (Explorer / Finder / Files).
 #[tauri::command]
-pub fn reveal_path(path: String) -> Result<(), String> {
+pub fn reveal_path(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     opener::reveal(&path).map_err(|e| e.to_string())
 }
 
@@ -197,6 +252,7 @@ fn finalize_config(state: &AppState, mut cfg: Config) -> Result<Config, String> 
 
 #[tauri::command]
 pub fn start_run(app: AppHandle, config: Config, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     {
         let guard = state.run.lock().unwrap();
         if guard.is_some() {
@@ -262,6 +318,7 @@ pub fn start_run(app: AppHandle, config: Config, state: State<'_, AppState>) -> 
 /// Abort a single file that's currently being processed (leaves the run going).
 #[tauri::command]
 pub fn abort_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     match state.active.lock().unwrap().get(&path) {
         Some(token) => {
             token.store(true, Ordering::Relaxed);
@@ -274,12 +331,14 @@ pub fn abort_file(path: String, state: State<'_, AppState>) -> Result<(), String
 /// Re-queue a file for processing (retry). Works while a run is active.
 #[tauri::command]
 pub async fn retry_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     requeue(state.db_path(), path, false).await
 }
 
 /// Re-queue a file, forcing it past the skip/abort checks.
 #[tauri::command]
 pub async fn force_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     requeue(state.db_path(), path, true).await
 }
 
@@ -329,6 +388,7 @@ fn notify_done(app: &AppHandle, summary: &RunSummary) {
 
 #[tauri::command]
 pub fn pause_run(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     match &*state.run.lock().unwrap() {
         Some(rc) => {
             rc.paused.store(true, Ordering::Relaxed);
@@ -340,6 +400,7 @@ pub fn pause_run(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn resume_run(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     match &*state.run.lock().unwrap() {
         Some(rc) => {
             rc.paused.store(false, Ordering::Relaxed);
@@ -351,6 +412,7 @@ pub fn resume_run(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn cancel_run(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     match &*state.run.lock().unwrap() {
         Some(rc) => {
             rc.cancel.store(true, Ordering::Relaxed);
@@ -363,6 +425,12 @@ pub fn cancel_run(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn is_running(state: State<'_, AppState>) -> bool {
     state.run.lock().unwrap().is_some()
+}
+
+/// Quit the whole app (used by the "quit anyway" close-warning action).
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -427,6 +495,7 @@ pub async fn get_history(
 
 #[tauri::command]
 pub async fn delete_history_item(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         Manifest::open(&db)
@@ -443,6 +512,7 @@ pub async fn delete_history_matching(
     filter: HistoryFilter,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    guard_locked(&state)?;
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         Manifest::open(&db)
@@ -456,6 +526,7 @@ pub async fn delete_history_matching(
 
 #[tauri::command]
 pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         Manifest::open(&db)
@@ -501,6 +572,7 @@ fn move_across(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<
 /// original was preserved via Holding mode.
 #[tauri::command]
 pub async fn restore_original(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     let holding = configured_holding_dir(&state);
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
@@ -537,6 +609,7 @@ pub async fn restore_original(path: String, state: State<'_, AppState>) -> Resul
 /// Write the persisted settings JSON to a user-chosen file (export).
 #[tauri::command]
 pub fn export_settings(dest: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     let settings = read_settings(&state);
     let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     std::fs::write(&dest, text).map_err(|e| e.to_string())
@@ -549,6 +622,7 @@ pub fn import_settings(
     src: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    guard_locked(&state)?;
     let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
     let value: serde_json::Value = serde_json::from_str(&text)
         .map_err(|_| "That file isn't valid settings JSON.".to_string())?;
@@ -572,6 +646,7 @@ pub async fn export_history(
     filter: HistoryFilter,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    guard_locked(&state)?;
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         let m = Manifest::open(&db).map_err(|e| e.to_string())?;
@@ -691,6 +766,7 @@ pub fn get_settings(state: State<'_, AppState>) -> serde_json::Value {
 
 #[tauri::command]
 pub fn save_settings(settings: serde_json::Value, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
     let path = state.settings_path();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

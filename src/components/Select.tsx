@@ -18,6 +18,7 @@ interface Props {
   options: SelectOption[];
   onChange: (value: string) => void;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -25,7 +26,7 @@ interface Props {
  * portaled to `document.body` with fixed positioning so glass cards (each their
  * own stacking context) can't paint over it.
  */
-export function Select({ value, options, onChange, ariaLabel }: Props) {
+export function Select({ value, options, onChange, ariaLabel, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -84,6 +85,7 @@ export function Select({ value, options, onChange, ariaLabel }: Props) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
         <span className="sel-value">{current?.label ?? value}</span>

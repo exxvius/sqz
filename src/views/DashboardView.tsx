@@ -3,9 +3,11 @@ import { EventLog } from "../components/EventLog";
 import { LiveFiles } from "../components/LiveFiles";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
+import { useLock } from "../lib/lock";
 
 export function DashboardView() {
   const store = useStore();
+  const { locked } = useLock();
   const active = Object.values(store.active);
   const { session, summary } = store;
 
@@ -67,21 +69,27 @@ export function DashboardView() {
 
         <div className="run-controls">
           {store.running ? (
-            <>
-              {store.paused ? (
-                <button className="btn primary" onClick={store.resume}>
-                  Resume
+            locked ? (
+              <span className="muted">
+                Run controls are locked. Encoding continues; unlock to pause or stop.
+              </span>
+            ) : (
+              <>
+                {store.paused ? (
+                  <button className="btn primary" onClick={store.resume}>
+                    Resume
+                  </button>
+                ) : (
+                  <button className="btn" onClick={store.pause}>
+                    Pause
+                  </button>
+                )}
+                <button className="btn danger" onClick={store.cancel}>
+                  Stop (resumable)
                 </button>
-              ) : (
-                <button className="btn" onClick={store.pause}>
-                  Pause
-                </button>
-              )}
-              <button className="btn danger" onClick={store.cancel}>
-                Stop (resumable)
-              </button>
-              <span className="muted">Progress is saved — stopping is always safe.</span>
-            </>
+                <span className="muted">Progress is saved — stopping is always safe.</span>
+              </>
+            )
           ) : (
             <span className="muted">No active run.</span>
           )}

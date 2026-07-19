@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, pickBinary } from "../lib/api";
 import { humanBytes } from "../lib/format";
+import { useLock } from "../lib/lock";
 import type { FfStatus, FfmpegProgress } from "../lib/types";
 
 interface Props {
@@ -18,6 +19,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export function FfmpegSetup({ ff, onChange, compact }: Props) {
+  const { locked } = useLock();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<FfmpegProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,20 +105,20 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
 
       <div className="card-actions" style={{ marginTop: compact ? "var(--space-2)" : 0 }}>
         {!present && (
-          <button className="btn primary" onClick={download} disabled={busy}>
+          <button className="btn primary" onClick={download} disabled={busy || locked}>
             {busy ? "Downloading…" : "Download FFmpeg"}
           </button>
         )}
         {present && (
-          <button className="btn" onClick={download} disabled={busy}>
+          <button className="btn" onClick={download} disabled={busy || locked}>
             Re-download
           </button>
         )}
-        <button className="btn ghost" onClick={useOwn} disabled={busy}>
+        <button className="btn ghost" onClick={useOwn} disabled={busy || locked}>
           Use my own…
         </button>
         {ff?.source === "custom" && (
-          <button className="btn ghost" onClick={reset} disabled={busy}>
+          <button className="btn ghost" onClick={reset} disabled={busy || locked}>
             Reset to auto
           </button>
         )}
@@ -132,7 +134,7 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
         <div className="field" style={{ marginTop: "var(--space-3)" }}>
           <label>ffmpeg</label>
           <span className="mono muted" style={{ fontSize: "var(--text-xs)" }}>
-            {ff?.ffmpeg}
+            {locked ? "•••••••••" : ff?.ffmpeg}
           </span>
         </div>
       )}

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { ActiveFile } from "../lib/store";
 import { fmtDuration, humanBytes, pct } from "../lib/format";
+import { useLock } from "../lib/lock";
 
 interface Props {
   active: ActiveFile[];
@@ -46,6 +47,7 @@ function avg(xs: number[]): number {
 }
 
 export function LiveFiles({ active, minSavings, onAbort }: Props) {
+  const { locked, maskName, maskPath } = useLock();
   if (active.length === 0) {
     return (
       <div className="empty">
@@ -61,12 +63,14 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
         return (
           <div className="live-card" key={f.path}>
             <div className="live-top">
-              <span className="live-name" title={f.path}>
-                {f.name}
+              <span className="live-name" title={locked ? maskPath(f.path) : f.path}>
+                {maskName(f.name)}
               </span>
-              <button className="live-abort" onClick={() => onAbort(f.path)}>
-                Abort
-              </button>
+              {!locked && (
+                <button className="live-abort" onClick={() => onAbort(f.path)}>
+                  Abort
+                </button>
+              )}
             </div>
 
             <div className="bar tall" style={{ "--p": d.progress } as CSSProperties}>

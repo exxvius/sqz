@@ -154,6 +154,38 @@ pub enum VerifyDepth {
     Checksummed,
 }
 
+/// Scaling filter used when downscaling a source taller than `max_height`.
+///
+/// The default (Lanczos) is sharpest but *rings* — it overshoots at high-contrast
+/// edges. That's fine for normal footage, but where hard edges must stay clean
+/// (e.g. chroma/luma-keyed or transparency-composited content) the overshoot
+/// injects stray values right at the edge. Gentler, non-ringing filters (Area
+/// especially) trade a little crispness to keep those edges intact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScaleFilter {
+    /// Sharpest, rings at edges. Best for normal footage. (ffmpeg default too.)
+    Lanczos,
+    /// Sharp with milder ringing than Lanczos.
+    Bicubic,
+    /// Soft, no ringing.
+    Bilinear,
+    /// Area-average (pixel mixing). No ringing; keeps hard edges clean.
+    Area,
+}
+
+impl ScaleFilter {
+    /// The value for ffmpeg's `scale=…:flags=` option.
+    pub fn flags(self) -> &'static str {
+        match self {
+            ScaleFilter::Lanczos => "lanczos",
+            ScaleFilter::Bicubic => "bicubic",
+            ScaleFilter::Bilinear => "bilinear",
+            ScaleFilter::Area => "area",
+        }
+    }
+}
+
 /// Order in which pending files are processed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -196,6 +228,8 @@ pub struct Config {
     pub workers: usize,
     pub min_savings: f64,
     pub max_height: u32,
+    /// Scaling filter used when a source is downscaled to `max_height`.
+    pub scale_filter: ScaleFilter,
     pub temp_dir: Option<PathBuf>,
     pub db_path: Option<PathBuf>,
     pub on_success: OnSuccess,
@@ -245,6 +279,7 @@ impl Default for Config {
             workers: DEFAULT_WORKERS,
             min_savings: DEFAULT_MIN_SAVINGS,
             max_height: DEFAULT_MAX_HEIGHT,
+            scale_filter: ScaleFilter::Lanczos,
             temp_dir: None,
             db_path: None,
             on_success: OnSuccess::Recycle,

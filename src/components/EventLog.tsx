@@ -4,6 +4,7 @@ import { openFile, revealFile } from "../lib/api";
 import type { LogEntry } from "../lib/store";
 import { currentPath, humanBytes } from "../lib/format";
 import { outcomeMeta } from "../lib/status";
+import { useLock } from "../lib/lock";
 
 interface Props {
   log: LogEntry[];
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function EventLog({ log, onRetry, onForce }: Props) {
+  const { locked, maskName, maskPath } = useLock();
   if (log.length === 0) {
     return <div className="empty">Events appear here as files are processed.</div>;
   }
@@ -31,7 +33,7 @@ export function EventLog({ log, onRetry, onForce }: Props) {
             <span className="saved-tag">−{humanBytes(e.savedBytes)}</span>
           ) : null;
 
-        const actions = (
+        const actions = locked ? null : (
           <>
             {!isFail && (
               <>
@@ -61,15 +63,15 @@ export function EventLog({ log, onRetry, onForce }: Props) {
             key={`${e.path}-${i}`}
             tone={m.tone}
             sym={m.sym}
-            name={e.name}
-            fullPath={e.path}
+            name={maskName(e.name)}
+            fullPath={locked ? undefined : e.path}
             tag={m.label}
             meta={meta}
             actions={actions}
           >
             <dl className="kv-grid">
               <dt>path</dt>
-              <dd>{e.path}</dd>
+              <dd>{maskPath(e.path)}</dd>
               {e.origSize != null && (
                 <>
                   <dt>before</dt>

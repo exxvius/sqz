@@ -11,6 +11,7 @@ pub mod discover;
 pub mod encode;
 pub mod encoders;
 pub mod ffbin;
+pub mod lock;
 pub mod manifest;
 pub mod paths;
 pub mod pipeline;

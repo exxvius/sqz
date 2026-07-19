@@ -6,10 +6,25 @@ import { Onboarding } from "./views/Onboarding";
 import { SettingsView } from "./views/SettingsView";
 import { api } from "./lib/api";
 import { defaultConfig, fromPersisted, persistable } from "./lib/config";
-import { HistoryIcon, HomeIcon, LiveIcon, Logo, SettingsIcon } from "./components/icons";
+import {
+  HistoryIcon,
+  HomeIcon,
+  LiveIcon,
+  LockIcon,
+  Logo,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon,
+  UnlockIcon,
+} from "./components/icons";
+import { PasswordModal, type PasswordModalMode } from "./components/PasswordModal";
+import { CloseWarningModal } from "./components/CloseWarningModal";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StoreProvider, useStore } from "./lib/store";
+import { LockProvider, useLock } from "./lib/lock";
 import { useTheme } from "./lib/theme";
 import { useAccent } from "./lib/accent";
+import { useCloseBehavior } from "./lib/closeBehavior";
 import { initCursorFx } from "./lib/cursor";
 import type { FfStatus, RunConfig } from "./lib/types";
 import type { ComponentType } from "react";
@@ -25,9 +40,13 @@ const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[]
 
 function Shell() {
   const store = useStore();
+  const lock = useLock();
   const [theme, toggleTheme] = useTheme();
   const [accent, setAccent] = useAccent();
+  const [closeBehavior, setCloseBehavior] = useCloseBehavior();
   const [view, setView] = useState<View>("home");
+  const [pwModal, setPwModal] = useState<PasswordModalMode | null>(null);
+  const [closeWarn, setCloseWarn] = useState(false);
   const [config, setConfig] = useState<RunConfig>(defaultConfig);
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem("sqz-onboarded"),
@@ -35,6 +54,35 @@ function Shell() {
 
   // Cursor-driven spotlight/border-glow on cards + background parallax.
   useEffect(() => initCursorFx(), []);
+
+  // The window close handler is registered once; read live values via refs.
+  const behaviorRef = useRef(closeBehavior);
+  const runningRef = useRef(store.running);
+  useEffect(() => {
+    behaviorRef.current = closeBehavior;
+  }, [closeBehavior]);
+  useEffect(() => {
+    runningRef.current = store.running;
+  }, [store.running]);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    win
+      .onCloseRequested(async (event) => {
+        if (behaviorRef.current === "tray") {
+          event.preventDefault();
+          await win.hide();
+        } else if (runningRef.current) {
+          // Quitting mid-run: confirm first, offering the tray as an alternative.
+          event.preventDefault();
+          setCloseWarn(true);
+        }
+        // Otherwise let the close proceed — the app exits.
+      })
+      .then((u) => (unlisten = u));
+    return () => unlisten?.();
+  }, []);
 
   const loaded = useRef(false);
   const [ff, setFf] = useState<FfStatus | null>(null);
@@ -65,6 +113,30 @@ function Shell() {
     setShowOnboarding(false);
   };
 
+  // Sidebar lock toggle: first time sets a password, later locks without a
+  // prompt and unlocks behind the password.
+  const onToggleLock = () => {
+    if (!lock.configured) setPwModal("setup");
+    else if (!lock.locked) lock.lock().catch(() => {});
+    else setPwModal("unlock");
+  };
+
+  const handlePwSubmit = async (values: {
+    password?: string;
+    oldPassword?: string;
+    newPassword?: string;
+  }) => {
+    if (pwModal === "setup") {
+      await lock.setup(values.password ?? "");
+      await lock.lock();
+    } else if (pwModal === "unlock") {
+      await lock.unlock(values.password ?? "");
+    } else if (pwModal === "change") {
+      await lock.changePassword(values.oldPassword ?? "", values.newPassword ?? "");
+    }
+    setPwModal(null);
+  };
+
   const body = useMemo(() => {
     switch (view) {
       case "home":
@@ -89,12 +161,14 @@ function Shell() {
             toggleTheme={toggleTheme}
             accent={accent}
             setAccent={setAccent}
+            closeBehavior={closeBehavior}
+            setCloseBehavior={setCloseBehavior}
             ff={ff}
             refreshFf={refreshFf}
           />
         );
     }
-  }, [view, config, theme, toggleTheme, accent, setAccent, ff, refreshFf]);
+  }, [view, config, theme, toggleTheme, accent, setAccent, closeBehavior, setCloseBehavior, ff, refreshFf]);
 
   return (
     <div className="app">
@@ -132,8 +206,22 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
-          <button className="theme-toggle" onClick={toggleTheme}>
-            {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
+          <button
+            className={`foot-btn${lock.locked ? " on" : ""}`}
+            onClick={onToggleLock}
+            aria-pressed={lock.locked}
+            title={
+              lock.locked
+                ? "Locked — click to unlock (password required)"
+                : "Lock the app: hide personal info and make it read-only"
+            }
+          >
+            {lock.locked ? <LockIcon size={15} /> : <UnlockIcon size={15} />}
+            <span>{lock.locked ? "Locked" : "Lock"}</span>
+          </button>
+          <button className="foot-btn" onClick={toggleTheme} disabled={lock.locked}>
+            {theme === "dark" ? <MoonIcon size={15} /> : <SunIcon size={15} />}
+            <span>{theme === "dark" ? "Dark" : "Light"}</span>
           </button>
         </div>
       </aside>
@@ -141,6 +229,26 @@ function Shell() {
       <main className="main">{body}</main>
 
       {showOnboarding && <Onboarding onClose={dismissOnboarding} />}
+      {pwModal && (
+        <PasswordModal
+          mode={pwModal}
+          onSubmit={handlePwSubmit}
+          onClose={() => setPwModal(null)}
+        />
+      )}
+      {closeWarn && (
+        <CloseWarningModal
+          onQuit={() => {
+            setCloseWarn(false);
+            api.quitApp();
+          }}
+          onMinimize={async () => {
+            setCloseWarn(false);
+            await getCurrentWindow().hide();
+          }}
+          onCancel={() => setCloseWarn(false)}
+        />
+      )}
     </div>
   );
 }
@@ -148,7 +256,9 @@ function Shell() {
 export default function App() {
   return (
     <StoreProvider>
-      <Shell />
+      <LockProvider>
+        <Shell />
+      </LockProvider>
     </StoreProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { confirm, message, save } from "@tauri-apps/plugin-dialog";
+import { message, save } from "@tauri-apps/plugin-dialog";
 import { StatusCard } from "../components/StatusCard";
+import { useConfirm } from "../components/ConfirmModal";
 import { FolderIcon, PlayIcon } from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
 import {
@@ -15,6 +16,7 @@ import {
 } from "../lib/format";
 import { forceable, retryable, statusMeta } from "../lib/status";
 import { useStore } from "../lib/store";
+import { useLock } from "../lib/lock";
 import type { History, Status } from "../lib/types";
 
 const CHIPS: { id: Status; label: string }[] = [
@@ -32,6 +34,8 @@ const PAGE_SIZE = 25;
 
 export function HistoryView() {
   const store = useStore();
+  const { locked, maskName, maskPath } = useLock();
+  const { confirm, element: confirmModal } = useConfirm();
   const [history, setHistory] = useState<History | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -73,19 +77,24 @@ export function HistoryView() {
   const removeFiltered = async () => {
     const count = history?.rows.length ?? 0;
     if (count === 0) return;
-    const ok = await confirm(
-      `Remove ${count} shown item${count === 1 ? "" : "s"} from the history database? This can't be undone.`,
-      { title: "Remove from history", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
-    );
+    const ok = await confirm({
+      title: "Remove from history",
+      message: `Remove ${count} shown item${count === 1 ? "" : "s"} from the history database? This can't be undone.`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
     if (!ok) return;
     await api.deleteHistoryMatching(filter());
     refresh();
   };
   const clearAll = async () => {
-    const ok = await confirm(
-      "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
-      { title: "Clear history", kind: "warning", okLabel: "Clear all", cancelLabel: "Cancel" },
-    );
+    const ok = await confirm({
+      title: "Clear history",
+      message:
+        "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
+      confirmLabel: "Clear all",
+      danger: true,
+    });
     if (!ok) return;
     await api.clearHistory();
     refresh();
@@ -97,10 +106,12 @@ export function HistoryView() {
   };
 
   const restore = async (path: string) => {
-    const ok = await confirm(
-      "Restore the original and send the encoded file to the Recycle Bin? This only works when the original was kept in a holding folder.",
-      { title: "Restore original", okLabel: "Restore", cancelLabel: "Cancel" },
-    );
+    const ok = await confirm({
+      title: "Restore original",
+      message:
+        "Restore the original and send the encoded file to the Recycle Bin? This only works when the original was kept in a holding folder.",
+      confirmLabel: "Restore",
+    });
     if (!ok) return;
     try {
       await api.restoreOriginal(path);
@@ -191,8 +202,9 @@ export function HistoryView() {
         <div className="filterbar">
           <input
             className="search"
-            placeholder="Search by path…"
-            value={search}
+            placeholder={locked ? "Search disabled while locked" : "Search by path…"}
+            value={locked ? "" : search}
+            disabled={locked}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="chips-row">
@@ -222,15 +234,23 @@ export function HistoryView() {
               : "loading…"}
           </span>
           <div className="grow" />
-          <button className="mini-btn" onClick={exportHistory}>
-            ⭳ Export
-          </button>
-          <button className="mini-btn danger" onClick={removeFiltered}>
-            Remove shown
-          </button>
-          <button className="mini-btn danger" onClick={clearAll}>
-            Clear all
-          </button>
+          {locked ? (
+            <span className="muted" style={{ fontSize: "var(--text-xs)" }}>
+              Editing &amp; export locked
+            </span>
+          ) : (
+            <>
+              <button className="mini-btn" onClick={exportHistory}>
+                ⭳ Export
+              </button>
+              <button className="mini-btn danger" onClick={removeFiltered}>
+                Remove shown
+              </button>
+              <button className="mini-btn danger" onClick={clearAll}>
+                Clear all
+              </button>
+            </>
+          )}
         </div>
 
         {history && allRows.length > 0 ? (
@@ -242,7 +262,7 @@ export function HistoryView() {
               ) : null;
             const encoded = r.status === "done" || r.status === "normalized";
             const filePath = currentPath(r.path, encoded);
-            const actions = (
+            const actions = locked ? null : (
               <>
                 {r.status !== "failed" && (
                   <>
@@ -282,15 +302,15 @@ export function HistoryView() {
                 key={r.path}
                 tone={m.tone}
                 sym={m.sym}
-                name={fileName(r.path)}
-                fullPath={r.path}
+                name={maskName(fileName(r.path))}
+                fullPath={locked ? undefined : r.path}
                 tag={m.label}
                 meta={savedTag ?? <span className="ecard-meta">{relativeTime(r.updated_at)}</span>}
                 actions={actions}
               >
                 <dl className="kv-grid">
                   <dt>path</dt>
-                  <dd>{r.path}</dd>
+                  <dd>{maskPath(r.path)}</dd>
                   <dt>status</dt>
                   <dd>{m.label}</dd>
                   {r.src_codec && (
@@ -354,6 +374,7 @@ export function HistoryView() {
           </div>
         )}
       </div>
+      {confirmModal}
     </div>
   );
 }

@@ -204,7 +204,7 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     if let Some(h) = info.height {
         if h > cfg.max_height {
             a.push("-vf".into());
-            a.push(format!("scale=-2:{}:flags=lanczos", cfg.max_height));
+            a.push(format!("scale=-2:{}:flags={}", cfg.max_height, cfg.scale_filter.flags()));
         }
     }
 
@@ -429,7 +429,7 @@ pub fn run_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::config::{AudioMode, Codec, Config, Container};
+    use super::super::config::{AudioMode, Codec, Config, Container, ScaleFilter};
     use super::super::encoders::Encoder;
     use std::path::PathBuf;
 
@@ -483,8 +483,16 @@ mod tests {
         let e = enc("av1_nvenc", EncoderFamily::Nvenc);
         let tall = build_args(&cfg, &info(2160, false), &e, Path::new("o.mkv")).join(" ");
         let short = build_args(&cfg, &info(720, false), &e, Path::new("o.mkv")).join(" ");
-        assert!(tall.contains("scale=-2:1080"));
+        assert!(tall.contains("scale=-2:1080:flags=lanczos"));
         assert!(!short.contains("scale="));
+    }
+
+    #[test]
+    fn scale_filter_threads_into_the_vf() {
+        let cfg = Config { scale_filter: ScaleFilter::Area, ..Config::default() };
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(2160, false), &e, Path::new("o.mkv")).join(" ");
+        assert!(a.contains("scale=-2:1080:flags=area"));
     }
 
     #[test]

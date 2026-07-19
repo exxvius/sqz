@@ -4,6 +4,8 @@ import { pickInputs } from "../lib/api";
 
 interface Props {
   onAdd: (paths: string[]) => void;
+  /** When true, ignore drops and disable the picker buttons (app is locked). */
+  disabled?: boolean;
 }
 
 /**
@@ -11,10 +13,13 @@ interface Props {
  * event (browser drag events don't carry real filesystem paths). Also offers
  * explicit "Add files/folders" buttons via the native picker.
  */
-export function DropZone({ onAdd }: Props) {
+export function DropZone({ onAdd, disabled }: Props) {
   const [over, setOver] = useState(false);
 
   useEffect(() => {
+    // The native drop event is global to the webview, so a disabled fieldset
+    // can't stop it — guard it explicitly.
+    if (disabled) return;
     let unlisten: (() => void) | undefined;
     getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -29,7 +34,7 @@ export function DropZone({ onAdd }: Props) {
       })
       .then((u) => (unlisten = u));
     return () => unlisten?.();
-  }, [onAdd]);
+  }, [onAdd, disabled]);
 
   return (
     <div className={`dropzone${over ? " over" : ""}`}>
@@ -39,10 +44,10 @@ export function DropZone({ onAdd }: Props) {
         playable replacement.
       </div>
       <div className="dz-actions">
-        <button className="btn" onClick={async () => onAdd(await pickInputs(false))}>
+        <button className="btn" disabled={disabled} onClick={async () => onAdd(await pickInputs(false))}>
           Add files
         </button>
-        <button className="btn ghost" onClick={async () => onAdd(await pickInputs(true))}>
+        <button className="btn ghost" disabled={disabled} onClick={async () => onAdd(await pickInputs(true))}>
           Add folders
         </button>
       </div>

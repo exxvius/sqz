@@ -10,9 +10,53 @@ pub mod events;
 pub mod ffsetup;
 pub mod run;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
 use crate::commands::AppState;
+
+/// Bring the main window back to the foreground (from the tray).
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// Build the system-tray icon + menu. Clicking the icon (or "Show sqz") restores
+/// the window; "Quit" exits. The tray is what makes "minimize to tray" usable.
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show sqz", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut builder = TrayIconBuilder::new()
+        .tooltip("sqz")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,6 +74,7 @@ pub fn run() {
 
             init_logging(&data_dir);
             app.manage(AppState::new(data_dir));
+            setup_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +94,7 @@ pub fn run() {
             commands::retry_file,
             commands::force_file,
             commands::is_running,
+            commands::quit_app,
             commands::get_history,
             commands::delete_history_item,
             commands::delete_history_matching,
@@ -60,6 +106,11 @@ pub fn run() {
             commands::import_settings,
             commands::export_history,
             commands::environment,
+            commands::lock_status,
+            commands::lock_setup,
+            commands::lock_app,
+            commands::unlock_app,
+            commands::lock_change_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running sqz");

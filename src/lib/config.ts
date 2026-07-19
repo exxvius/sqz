@@ -11,6 +11,7 @@ export const defaultConfig = (): RunConfig => ({
   workers: 2,
   min_savings: 0.1,
   max_height: 1080,
+  scale_filter: "lanczos",
   on_success: "recycle",
   holding_dir: null,
   holding_retention_days: 0,

@@ -8,6 +8,7 @@ import type {
   FfStatus,
   History,
   HistoryFilter,
+  LockStatus,
   RunConfig,
   ScanResult,
 } from "./types";
@@ -39,6 +40,13 @@ export const api = {
   exportHistory: (dest: string, format: "csv" | "json", filter: HistoryFilter = {}) =>
     invoke<number>("export_history", { dest, format, filter }),
   environment: () => invoke<EnvInfo>("environment"),
+  quitApp: () => invoke<void>("quit_app"),
+  lockStatus: () => invoke<LockStatus>("lock_status"),
+  lockSetup: (password: string) => invoke<void>("lock_setup", { password }),
+  lockApp: () => invoke<void>("lock_app"),
+  unlockApp: (password: string) => invoke<void>("unlock_app", { password }),
+  lockChangePassword: (oldPassword: string, newPassword: string) =>
+    invoke<void>("lock_change_password", { oldPassword, newPassword }),
   downloadFfmpeg: () => invoke<void>("download_ffmpeg"),
   setFfmpegPaths: (ffmpeg: string, ffprobe: string) =>
     invoke<void>("set_ffmpeg_paths", { ffmpeg, ffprobe }),
