@@ -2,14 +2,15 @@
 //! without the Tauri shell.
 //!
 //! Dependency order: config → probe → encoders → encode → verify → paths →
-//! replace → manifest → discover → pipeline, with `ffbin` locating the bundled
-//! binaries and `report` providing the frontend boundary.
+//! replace → manifest → discover → estimate → pipeline, with `ffbin` locating
+//! the bundled binaries and `report` providing the frontend boundary.
 
 pub mod abort;
 pub mod config;
 pub mod discover;
 pub mod encode;
 pub mod encoders;
+pub mod estimate;
 pub mod ffbin;
 pub mod lock;
 pub mod manifest;

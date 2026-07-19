@@ -19,6 +19,19 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden; /* the app manages its own scroll regions */
+  /* Desktop app: dragging across the chrome shouldn't select UI text. Real
+     text-entry surfaces (and anything opting in with .selectable) re-enable it
+     below, so typing, editing, and copying still work where they should. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 :root {

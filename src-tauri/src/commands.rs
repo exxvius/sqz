@@ -13,12 +13,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::core::config::{Config, OnSuccess, HOLDING_DIRNAME};
 use crate::core::discover::discover;
 use crate::core::encoders::{self, Detection};
+use crate::core::estimate::{self, ProbedFile, ReclaimProjection};
 use crate::core::ffbin::FfBin;
 use crate::core::lock::Lock;
 use crate::core::manifest::{HistoryQuery, HistoryRow, Manifest};
 use crate::core::paths::holding_path_for;
+use crate::core::probe::probe_many;
 use crate::core::util::command_no_window;
-use crate::events::{TauriReporter, EV_RUN_DONE};
+use crate::events::{TauriReporter, EV_PROJECTION, EV_RUN_DONE};
 use crate::run::{run, ActiveMap, RunSummary};
 
 /// Per-run steering flags shared between a command handler and the run thread.
@@ -35,6 +37,9 @@ pub struct AppState {
     pub run: Mutex<Option<RunControl>>,
     /// Cancel tokens for files currently being processed (for per-file abort).
     pub active: ActiveMap,
+    /// Cancel token for the in-flight reclaimable-space projection (Tier-2 probe
+    /// pass). A new projection request cancels the previous one.
+    pub projection: Mutex<Option<Arc<AtomicBool>>>,
     /// Password-gated lock: masks personal info and makes the app read-only.
     pub lock: Lock,
 }
@@ -48,6 +53,7 @@ impl AppState {
             ff: Mutex::new(ff),
             run: Mutex::new(None),
             active: Arc::new(Mutex::new(HashMap::new())),
+            projection: Mutex::new(None),
             lock,
         }
     }
@@ -238,6 +244,107 @@ pub async fn scan_inputs(inputs: Vec<String>) -> Result<ScanResult, String> {
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Estimate how much space a run over `config.inputs` would reclaim.
+///
+/// Returns immediately with a Tier-1 (instant) projection from the manifest's
+/// global savings ratio, then spawns a bounded, cancellable probe pass that
+/// emits a refined Tier-2 projection via the `sqz-projection` event. A fresh
+/// call cancels any in-flight probe pass, so a changing input set never races.
+#[tauri::command]
+pub async fn project_reclaim(
+    app: AppHandle,
+    config: Config,
+    state: State<'_, AppState>,
+) -> Result<ReclaimProjection, String> {
+    let db = state.db_path();
+    let ff = state.ff();
+
+    // Install a fresh cancel token, cancelling any previous projection.
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut guard = state.projection.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.store(true, Ordering::Relaxed);
+        }
+        *guard = Some(Arc::clone(&cancel));
+    }
+
+    // Tier 1 (instant): discover + size the inputs, apply the global ratio.
+    let (tier1_proj, sized) = {
+        let cfg = config.clone();
+        let db = db.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<_, String> {
+            let sized: Vec<(PathBuf, u64)> = discover(&cfg)
+                .into_iter()
+                .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (p, m.len())))
+                .collect();
+            let total_bytes: u64 = sized.iter().map(|(_, s)| s).sum();
+            let global = Manifest::open(&db)
+                .map_err(|e| e.to_string())?
+                .global_savings_ratio()
+                .map_err(|e| e.to_string())?;
+            let proj = estimate::tier1(sized.len() as u32, total_bytes, global, cfg.codec);
+            Ok((proj, sized))
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
+
+    // Tier 2 (background): probe → per-bucket refine → emit. Skipped when there's
+    // nothing to probe or FFmpeg isn't available (Tier 1 already stands alone).
+    if !sized.is_empty() && ff.is_present() {
+        let cfg = config;
+        std::thread::spawn(move || {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let manifest = match Manifest::open(&db) {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            let global = manifest.global_savings_ratio().ok().flatten();
+            let raw = manifest.bucket_savings_ratios().unwrap_or_default();
+            let bucket_ratios = estimate::aggregate_bucket_ratios(&raw);
+
+            let paths: Vec<PathBuf> = sized.iter().map(|(p, _)| p.clone()).collect();
+            let infos = probe_many(&ff.ffprobe, &paths, cfg.resolved_workers(), &cancel);
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+
+            let rows: Vec<ProbedFile> = sized
+                .iter()
+                .zip(infos.iter())
+                .map(|((_, bytes), info)| match info {
+                    Some(mi) => ProbedFile {
+                        src_codec: mi.codec.clone().unwrap_or_else(|| "unknown".into()),
+                        height_band: mi
+                            .height
+                            .map(estimate::height_band)
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        bytes: *bytes,
+                        skip: estimate::predict_skip(&cfg, mi, cfg.force).is_some(),
+                    },
+                    None => ProbedFile {
+                        src_codec: "unknown".into(),
+                        height_band: "unknown".into(),
+                        bytes: *bytes,
+                        skip: false,
+                    },
+                })
+                .collect();
+
+            let proj = estimate::tier2(&rows, global, &bucket_ratios, cfg.codec);
+            if !cancel.load(Ordering::Relaxed) {
+                let _ = app.emit(EV_PROJECTION, &proj);
+            }
+        });
+    }
+
+    Ok(tier1_proj)
 }
 
 /// Inject the managed db path and a default holding dir, then validate.
@@ -633,8 +740,11 @@ pub fn import_settings(
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap_or_default())
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&value).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(value)
 }
 
@@ -674,9 +784,8 @@ fn csv_escape(s: &str) -> String {
 }
 
 fn history_to_csv(rows: &[HistoryRow]) -> String {
-    let mut out = String::from(
-        "path,status,size,src_codec,height,out_size,saved_bytes,updated_at,error\n",
-    );
+    let mut out =
+        String::from("path,status,size,src_codec,height,out_size,saved_bytes,updated_at,error\n");
     let num = |v: Option<i64>| v.map(|n| n.to_string()).unwrap_or_default();
     let unum = |v: Option<u64>| v.map(|n| n.to_string()).unwrap_or_default();
     for r in rows {
@@ -718,12 +827,18 @@ pub async fn environment(state: State<'_, AppState>) -> Result<EnvInfo, String> 
     let ff = state.ff();
     let present = ff.is_present();
     tauri::async_runtime::spawn_blocking(move || {
-        let ffmpeg_version = if present { ffmpeg_version(&ff.ffmpeg) } else { None };
+        let ffmpeg_version = if present {
+            ffmpeg_version(&ff.ffmpeg)
+        } else {
+            None
+        };
         let detection = present.then(|| encoders::detect(&ff.ffmpeg, VALIDATE_TIMEOUT));
         EnvInfo {
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
-            cpus: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+            cpus: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(0),
             locale: detect_locale(),
             ffmpeg_present: present,
             ffmpeg_path: ff.ffmpeg.to_string_lossy().into_owned(),
@@ -765,7 +880,10 @@ pub fn get_settings(state: State<'_, AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn save_settings(settings: serde_json::Value, state: State<'_, AppState>) -> Result<(), String> {
+pub fn save_settings(
+    settings: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     guard_locked(&state)?;
     let path = state.settings_path();
     if let Some(parent) = path.parent() {

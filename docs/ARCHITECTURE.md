@@ -36,6 +36,7 @@ be unit-tested on its own.
 | `core/replace`      | Atomic swap + trash/holding/delete with recovery |
 | `core/manifest`     | Resumable SQLite state (rusqlite, WAL) |
 | `core/discover`     | Expand inputs into a de-duplicated video list |
+| `core/estimate`     | Skip predicates (shared with the pipeline) + reclaimable-space projection |
 | `core/pipeline`     | Per-file state machine: probe → skip? → encode → verify → swap → record |
 | `core/ffbin`        | Locate ffmpeg/ffprobe (custom path → downloaded → PATH) |
 | `ffsetup`           | On-demand FFmpeg download/extract + bring-your-own config |

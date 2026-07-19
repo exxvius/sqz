@@ -13,6 +13,7 @@ import { commandHandler, scenes } from "./scenes";
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "home";
 const theme = params.get("theme") ?? "dark";
+const locked = params.get("locked") === "1";
 
 // Skip onboarding overlay; preset the history filter to show varied statuses.
 localStorage.setItem("sqz-onboarded", "1");
@@ -25,7 +26,7 @@ if (scene === "history") {
 }
 
 mockWindows("main");
-mockIPC((cmd, args) => commandHandler(cmd, args, scene), { shouldMockEvents: true });
+mockIPC((cmd, args) => commandHandler(cmd, args, scene, { locked }), { shouldMockEvents: true });
 
 // Render without StrictMode so engine-event listeners aren't double-mounted
 // (which would double-count emitted events in the store).

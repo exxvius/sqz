@@ -25,6 +25,9 @@ dist-ssr/
 *.log
 sqz.lock
 
+# --- Internal planning docs (not public-facing) ---
+/docs/plans/
+
 # --- Editor / OS ---
 .vscode/*
 !.vscode/extensions.json

@@ -86,6 +86,7 @@ pub fn run() {
             commands::reveal_path,
             commands::detect_encoders,
             commands::scan_inputs,
+            commands::project_reclaim,
             commands::start_run,
             commands::pause_run,
             commands::resume_run,

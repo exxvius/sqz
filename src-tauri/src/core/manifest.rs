@@ -49,6 +49,10 @@ pub struct StatusUpdate {
     pub encode_ms: Option<i64>,
 }
 
+/// One raw history aggregate per `(codec, height)` group:
+/// `(src_codec, height, saved_sum, size_sum, sample_count)`.
+pub type BucketAggRow = (String, i64, i64, i64, u32);
+
 /// A file row for the UI history view (any status).
 #[derive(Debug, Clone, Serialize)]
 pub struct HistoryRow {
@@ -173,8 +177,7 @@ impl Manifest {
 
     pub fn pending_paths(&self) -> rusqlite::Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT path FROM files WHERE status=?1 ORDER BY path")?;
+        let mut stmt = conn.prepare("SELECT path FROM files WHERE status=?1 ORDER BY path")?;
         let rows = stmt.query_map(params![STATUS_PENDING], |r| r.get::<_, String>(0))?;
         rows.collect()
     }
@@ -200,6 +203,50 @@ impl Manifest {
         )
     }
 
+    /// Global realized savings ratio over all completed re-encodes:
+    /// `SUM(saved_bytes) / SUM(size)` on `done` rows. Returns `(ratio, n)`, or
+    /// `None` when there's no usable history yet. This is the projection's
+    /// instant Tier-1 prior.
+    pub fn global_savings_ratio(&self) -> rusqlite::Result<Option<(f64, u32)>> {
+        let conn = self.conn.lock().unwrap();
+        let (saved, size, n): (i64, i64, i64) = conn.query_row(
+            "SELECT COALESCE(SUM(saved_bytes), 0), COALESCE(SUM(size), 0), COUNT(*) \
+             FROM files WHERE status=?1 AND size > 0 AND saved_bytes IS NOT NULL",
+            params![STATUS_DONE],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        if n == 0 || size <= 0 {
+            return Ok(None);
+        }
+        let ratio = (saved as f64 / size as f64).clamp(0.0, 1.0);
+        Ok(Some((ratio, n as u32)))
+    }
+
+    /// Realized savings aggregates grouped by `(src_codec, height)` over `done`
+    /// rows: `(codec, height, saved_sum, size_sum, n)`. Height is bucketed into
+    /// bands in Rust (see `core::estimate`) so the band logic lives in one place.
+    pub fn bucket_savings_ratios(&self) -> rusqlite::Result<Vec<BucketAggRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT src_codec, height, COALESCE(SUM(saved_bytes), 0), \
+             COALESCE(SUM(size), 0), COUNT(*) \
+             FROM files \
+             WHERE status=?1 AND size > 0 AND saved_bytes IS NOT NULL \
+             AND src_codec IS NOT NULL AND height IS NOT NULL \
+             GROUP BY src_codec, height",
+        )?;
+        let rows = stmt.query_map(params![STATUS_DONE], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)? as u32,
+            ))
+        })?;
+        rows.collect()
+    }
+
     /// Atomically claim the next pending file, marking it `processing` so no other
     /// worker takes it. `order` chooses which pending file wins. Returns the path
     /// and whether it was flagged force-process.
@@ -216,7 +263,9 @@ impl Manifest {
             order.sql()
         );
         let claimed: Option<(String, i64)> = conn
-            .query_row(&sql, params![STATUS_PENDING], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(&sql, params![STATUS_PENDING], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .optional()?;
         if let Some((path, forced)) = &claimed {
             conn.execute(
@@ -278,8 +327,7 @@ impl Manifest {
                 params![STATUS_DONE],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )?;
-        let files_touched: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+        let files_touched: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
         Ok(Stats {
             total_reclaimed,
             encode_seconds: encode_ms as f64 / 1000.0,
@@ -396,7 +444,9 @@ fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
         status: r.get(1)?,
         size: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
         src_codec: r.get(3)?,
-        height: r.get::<_, Option<i64>>(4)?.and_then(|v| u32::try_from(v).ok()),
+        height: r
+            .get::<_, Option<i64>>(4)?
+            .and_then(|v| u32::try_from(v).ok()),
         out_size: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         saved_bytes: r.get(6)?,
         error: r.get(7)?,
@@ -446,7 +496,8 @@ mod tests {
     fn unchanged_terminal_file_is_not_reprocessed() {
         let m = mem_db();
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
-        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default()).unwrap();
+        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
+            .unwrap();
         // Same size/mtime, no force → stays done.
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
         assert!(m.pending_paths().unwrap().is_empty());
@@ -484,16 +535,76 @@ mod tests {
     fn changed_file_is_requeued() {
         let m = mem_db();
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
-        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default()).unwrap();
+        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
+            .unwrap();
         m.upsert_scanned("/a.mkv", 200, 2.0, false, true).unwrap(); // changed
         assert_eq!(m.pending_paths().unwrap(), vec!["/a.mkv".to_string()]);
+    }
+
+    #[test]
+    fn global_savings_ratio_is_none_without_history_then_computed() {
+        let m = mem_db();
+        assert!(m.global_savings_ratio().unwrap().is_none());
+
+        m.upsert_scanned("/a.mkv", 1000, 1.0, false, true).unwrap();
+        m.set_status(
+            "/a.mkv",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_size: Some(400),
+                saved_bytes: Some(600),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (ratio, n) = m.global_savings_ratio().unwrap().unwrap();
+        assert_eq!(n, 1);
+        assert!((ratio - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bucket_savings_ratios_group_by_codec_and_height() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 1000, 1.0, false, true).unwrap();
+        m.set_status(
+            "/a.mkv",
+            STATUS_DONE,
+            &StatusUpdate {
+                src_codec: Some("h264".into()),
+                height: Some(1080),
+                out_size: Some(500),
+                saved_bytes: Some(500),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // A skipped row must not pollute the aggregates.
+        m.upsert_scanned("/b.mkv", 2000, 1.0, false, true).unwrap();
+        m.set_status(
+            "/b.mkv",
+            STATUS_SKIPPED_EFFICIENT,
+            &StatusUpdate {
+                src_codec: Some("av1".into()),
+                height: Some(1080),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let rows = m.bucket_savings_ratios().unwrap();
+        assert_eq!(rows.len(), 1);
+        let (codec, height, saved, size, n) = &rows[0];
+        assert_eq!(codec, "h264");
+        assert_eq!(*height, 1080);
+        assert_eq!((*saved, *size, *n), (500, 1000, 1));
     }
 
     #[test]
     fn failed_is_retried_by_default_but_not_when_disabled() {
         let m = mem_db();
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
-        m.set_status("/a.mkv", STATUS_FAILED, &StatusUpdate::default()).unwrap();
+        m.set_status("/a.mkv", STATUS_FAILED, &StatusUpdate::default())
+            .unwrap();
 
         m.upsert_scanned("/a.mkv", 100, 1.0, false, false).unwrap(); // retry off
         assert!(m.pending_paths().unwrap().is_empty());

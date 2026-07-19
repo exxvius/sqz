@@ -128,7 +128,10 @@ fn detect_dolby_vision(video: &serde_json::Value) -> bool {
             list.iter().any(|sd| {
                 sd.get("side_data_type")
                     .and_then(serde_json::Value::as_str)
-                    .map(|t| t.to_ascii_lowercase().contains("dovi") || t.to_ascii_lowercase().contains("dolby vision"))
+                    .map(|t| {
+                        t.to_ascii_lowercase().contains("dovi")
+                            || t.to_ascii_lowercase().contains("dolby vision")
+                    })
                     .unwrap_or(false)
             })
         })
@@ -139,7 +142,12 @@ fn detect_dolby_vision(video: &serde_json::Value) -> bool {
 /// a placeholder ("unknown"/"reserved"/"N/A") we must not pass to the encoder.
 fn color_field(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?.trim();
-    if s.is_empty() || matches!(s.to_ascii_lowercase().as_str(), "unknown" | "reserved" | "n/a") {
+    if s.is_empty()
+        || matches!(
+            s.to_ascii_lowercase().as_str(),
+            "unknown" | "reserved" | "n/a"
+        )
+    {
         return None;
     }
     Some(s.to_string())
@@ -228,7 +236,8 @@ pub fn probe(ffprobe: &Path, path: &Path, timeout: Duration) -> Result<MediaInfo
         }
     }
 
-    let fps = parse_fps(video.get("avg_frame_rate")).or_else(|| parse_fps(video.get("r_frame_rate")));
+    let fps =
+        parse_fps(video.get("avg_frame_rate")).or_else(|| parse_fps(video.get("r_frame_rate")));
 
     let sub_codecs = streams
         .iter()
@@ -255,11 +264,49 @@ pub fn probe(ffprobe: &Path, path: &Path, timeout: Duration) -> Result<MediaInfo
     })
 }
 
+/// Probe many files with bounded concurrency, returning one entry per input path
+/// (in order); `None` where the probe failed. Bails early if `cancel` flips —
+/// used by the reclaimable-space projection, which must abandon its work the
+/// moment the input set changes underneath it.
+pub fn probe_many(
+    ffprobe: &Path,
+    paths: &[PathBuf],
+    cap: usize,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Vec<Option<MediaInfo>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    let n = paths.len();
+    // Per-slot cells so workers write results without contending on one lock.
+    let results: Vec<Mutex<Option<MediaInfo>>> = (0..n).map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+    let workers = cap.max(1).min(n.max(1));
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= n {
+                    break;
+                }
+                let info = probe(ffprobe, &paths[i], Duration::from_secs(60)).ok();
+                *results[i].lock().unwrap() = info;
+            });
+        }
+    });
+
+    results
+        .into_iter()
+        .map(|m| m.into_inner().unwrap())
+        .collect()
+}
+
 /// Run a command with a wall-clock timeout, killing it if it overruns.
-fn run_with_timeout(
-    mut cmd: Command,
-    timeout: Duration,
-) -> std::io::Result<std::process::Output> {
+fn run_with_timeout(mut cmd: Command, timeout: Duration) -> std::io::Result<std::process::Output> {
     use std::process::Stdio;
     let mut child = cmd
         .stdout(Stdio::piped())
@@ -359,6 +406,24 @@ mod tests {
         let mut m = base();
         m.fps = None;
         assert!(m.bits_per_pixel().is_none());
+    }
+
+    #[test]
+    fn probe_many_empty_input_returns_empty() {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let out = probe_many(Path::new("ffprobe"), &[], 4, &cancel);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn probe_many_bails_when_cancelled_before_start() {
+        // Pre-cancelled: workers exit immediately, so no ffprobe is ever spawned
+        // and every slot stays None (aligned one-per-path).
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let paths = vec![PathBuf::from("/nope/a.mkv"), PathBuf::from("/nope/b.mkv")];
+        let out = probe_many(Path::new("ffprobe"), &paths, 4, &cancel);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(Option::is_none));
     }
 
     #[test]

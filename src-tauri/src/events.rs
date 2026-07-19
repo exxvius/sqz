@@ -14,6 +14,9 @@ pub const EV_FILE_END: &str = "sqz-file-end";
 pub const EV_FILE_RECORD: &str = "sqz-file-record";
 pub const EV_RUN_START: &str = "sqz-run-start";
 pub const EV_RUN_DONE: &str = "sqz-run-done";
+/// Tier-2 (probe-refined) reclaimable-space projection, emitted after a
+/// `project_reclaim` call finishes its background probe pass.
+pub const EV_PROJECTION: &str = "sqz-projection";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStart {

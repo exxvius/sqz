@@ -53,6 +53,32 @@ export interface ScanResult {
   total_bytes: number;
 }
 
+/** One (codec × resolution) slice of a reclaimable-space projection. */
+export interface ReclaimBucket {
+  src_codec: string;
+  height_band: string;
+  files: number;
+  candidate_bytes: number;
+  est_reclaimable_bytes: number;
+  est_skipped_files: number;
+  sample_size: number;
+  confidence: number;
+}
+
+/** How much a run would reclaim, estimated from the manifest's own history. */
+export interface ReclaimProjection {
+  /** 1 = instant estimate, 2 = probe-refined. */
+  tier: number;
+  candidate_files: number;
+  candidate_bytes: number;
+  est_reclaimable_bytes: number;
+  est_skipped_files: number;
+  buckets: ReclaimBucket[];
+  based_on_history_rows: number;
+  confidence: "low" | "fair" | "good";
+  cold_start: boolean;
+}
+
 /** Subset of the Rust `Config` the UI sends (serde fills the rest). */
 export interface RunConfig {
   inputs: string[];

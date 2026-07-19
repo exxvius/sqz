@@ -45,12 +45,17 @@ Nothing destructive happens until the new file has earned it:
 ## Screenshots
 
 <p align="center">
-  <img src="docs/images/home-dark.png" alt="Home: queue, codec and quality presets" width="49%">
+  <img src="docs/images/home-dark.png" alt="Home: sources, codec and quality presets, and a live reclaimable-space estimate" width="49%">
   &nbsp;
-  <img src="docs/images/history-dark.png" alt="History: reclaimed space, filters, per-file results" width="49%">
+  <img src="docs/images/home-breakdown-dark.png" alt="Home: reclaimable-space projection broken down by codec and resolution before you run" width="49%">
 </p>
 <p align="center">
+  <img src="docs/images/history-dark.png" alt="History: reclaimed space, filters, per-file results" width="49%">
+  &nbsp;
   <img src="docs/images/live-encodes-dark.png" alt="Live: in-flight encodes with per-file progress, projected savings, speed, and ETA" width="49%">
+</p>
+<p align="center">
+  <img src="docs/images/live-locked-dark.png" alt="Live, locked: personal paths masked and controls read-only while the app is locked" width="49%">
   &nbsp;
   <img src="docs/images/settings-violet-dark.png" alt="Settings: recolorable accent theming (Violet shown), bundled FFmpeg, and data controls" width="49%">
 </p>

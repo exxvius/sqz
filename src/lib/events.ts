@@ -10,6 +10,7 @@ export const EV = {
   fileRecord: "sqz-file-record",
   runStart: "sqz-run-start",
   runDone: "sqz-run-done",
+  projection: "sqz-projection",
 } as const;
 
 export interface EngineHandlers {

@@ -9,6 +9,7 @@ use super::abort::{AbortConfig, AbortJudge, AbortProjection};
 use super::config::Config;
 use super::encode::{build_args, build_remux_args, run_encode, ProgressSample};
 use super::encoders::Encoder;
+use super::estimate::{predict_skip, SkipKind};
 use super::ffbin::FfBin;
 use super::manifest::{mtime_secs, Manifest, StatusUpdate};
 use super::paths::temp_dir_for;
@@ -23,32 +24,6 @@ fn is_target_container(path: &Path, cfg: &Config) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(cfg.container.ext()))
         .unwrap_or(false)
-}
-
-/// Skip files already in the target codec at/under the height cap. Avoids
-/// pointless re-encodes and prevents reprocessing our own output.
-pub fn is_already_efficient(cfg: &Config, info: &MediaInfo) -> bool {
-    let codec_ok = info
-        .codec
-        .as_deref()
-        .map(|c| cfg.codec.probe_names().contains(&c))
-        .unwrap_or(false);
-    codec_ok && info.height.map(|h| h <= cfg.max_height).unwrap_or(false)
-}
-
-/// Predict, before encoding, whether the re-encode is worth it. Downscaled files
-/// always are (big savings), so only same-resolution re-encodes are candidates.
-/// A source already at low bits-per-pixel won't shrink meaningfully.
-pub fn predicted_marginal(cfg: &Config, info: &MediaInfo) -> bool {
-    match info.height {
-        Some(h) if h > cfg.max_height => return false, // will downscale → worth it
-        None => return false,
-        _ => {}
-    }
-    match info.bits_per_pixel() {
-        Some(bpp) => bpp < cfg.marginal_bpp,
-        None => false, // can't predict → don't skip
-    }
 }
 
 fn cleanup(path: &Path) {
@@ -87,7 +62,9 @@ fn skip_or_normalize(
     reporter: &dyn Reporter,
 ) -> ProcessResult {
     if cfg.normalize_container && !cfg.dry_run && !is_target_container(src, cfg) {
-        if let Some(r) = try_remux(ff, cfg, manifest, info, src, path_str, size, cancel, reporter) {
+        if let Some(r) = try_remux(
+            ff, cfg, manifest, info, src, path_str, size, cancel, reporter,
+        ) {
             return r;
         }
     }
@@ -111,10 +88,17 @@ fn try_remux(
     reporter: &dyn Reporter,
 ) -> Option<ProcessResult> {
     let temp_dir = temp_dir_for(src, cfg).ok()?;
-    let out = temp_dir.join(format!("sqz_{}.{}", uuid::Uuid::new_v4().simple(), cfg.container.ext()));
+    let out = temp_dir.join(format!(
+        "sqz_{}.{}",
+        uuid::Uuid::new_v4().simple(),
+        cfg.container.ext()
+    ));
     let args = build_remux_args(cfg, info, &out);
 
-    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     reporter.on_file_start(path_str, &name, info.duration, size);
     let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
     let enc = run_encode(&ff.ffmpeg, &args, cancel, &mut on_progress, None);
@@ -141,11 +125,16 @@ fn try_remux(
         return None;
     }
     let saved = size as i64 - out_size as i64;
-    set(manifest, path_str, Outcome::Normalized, StatusUpdate {
-        out_size: Some(out_size),
-        saved_bytes: Some(saved),
-        ..meta_of(info)
-    });
+    set(
+        manifest,
+        path_str,
+        Outcome::Normalized,
+        StatusUpdate {
+            out_size: Some(out_size),
+            saved_bytes: Some(saved),
+            ..meta_of(info)
+        },
+    );
     let mut r = ProcessResult::new(path_str, Outcome::Normalized);
     r.saved_bytes = saved;
     r.orig_size = Some(size);
@@ -171,9 +160,7 @@ pub fn process_file(
     // A per-file force flag (from a "force process" action) OR the run-wide force.
     let force = cfg.force || forced;
     // Stop this file if the whole run is cancelled OR this file was aborted.
-    let cancelled = || {
-        global_cancel.load(Ordering::Relaxed) || file_cancel.load(Ordering::Relaxed)
-    };
+    let cancelled = || global_cancel.load(Ordering::Relaxed) || file_cancel.load(Ordering::Relaxed);
 
     if cancelled() {
         return ProcessResult::new(path_str, Outcome::Cancelled);
@@ -182,30 +169,45 @@ pub fn process_file(
     let meta = match std::fs::metadata(src) {
         Ok(m) => m,
         Err(e) => {
-            set(manifest, path_str, Outcome::Failed, StatusUpdate {
-                error: Some(format!("stat failed: {e}")),
-                ..Default::default()
-            });
+            set(
+                manifest,
+                path_str,
+                Outcome::Failed,
+                StatusUpdate {
+                    error: Some(format!("stat failed: {e}")),
+                    ..Default::default()
+                },
+            );
             return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
         }
     };
     let size = meta.len();
 
     if size == 0 {
-        set(manifest, path_str, Outcome::Failed, StatusUpdate {
-            error: Some("empty file".into()),
-            ..Default::default()
-        });
+        set(
+            manifest,
+            path_str,
+            Outcome::Failed,
+            StatusUpdate {
+                error: Some("empty file".into()),
+                ..Default::default()
+            },
+        );
         return ProcessResult::new(path_str, Outcome::Failed).with_message("empty file");
     }
 
     let info = match probe(&ff.ffprobe, src, Duration::from_secs(120)) {
         Ok(i) => i,
         Err(e) => {
-            set(manifest, path_str, Outcome::Failed, StatusUpdate {
-                error: Some(format!("probe: {e}")),
-                ..Default::default()
-            });
+            set(
+                manifest,
+                path_str,
+                Outcome::Failed,
+                StatusUpdate {
+                    error: Some(format!("probe: {e}")),
+                    ..Default::default()
+                },
+            );
             return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
         }
     };
@@ -216,27 +218,55 @@ pub fn process_file(
         ..Default::default()
     };
 
-    // Dolby Vision guardrail: re-encoding drops the DV enhancement layer/RPU, so
-    // skip such sources (a lossless container-normalize remux still preserves DV).
-    if !force && cfg.skip_dolby_vision && info.dolby_vision {
-        return skip_or_normalize(
-            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedNoGain, &cancelled,
-            reporter,
-        );
-    }
-
-    if !force && is_already_efficient(cfg, &info) {
-        return skip_or_normalize(
-            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedEfficient, &cancelled,
-            reporter,
-        );
-    }
-
-    if !force && cfg.skip_marginal && predicted_marginal(cfg, &info) {
-        return skip_or_normalize(
-            ff, cfg, manifest, &info, src, path_str, size, Outcome::SkippedMarginal, &cancelled,
-            reporter,
-        );
+    // Skip checks — shared with the projection via `predict_skip`, so the
+    // estimate can never disagree with what a run actually does.
+    // • Dolby Vision: re-encoding drops the DV enhancement layer/RPU (a lossless
+    //   container-normalize remux still preserves DV), so it records as no-gain.
+    // • Already-efficient / marginal both remain their own outcomes.
+    match predict_skip(cfg, &info, force) {
+        Some(SkipKind::DolbyVision) => {
+            return skip_or_normalize(
+                ff,
+                cfg,
+                manifest,
+                &info,
+                src,
+                path_str,
+                size,
+                Outcome::SkippedNoGain,
+                &cancelled,
+                reporter,
+            );
+        }
+        Some(SkipKind::AlreadyEfficient) => {
+            return skip_or_normalize(
+                ff,
+                cfg,
+                manifest,
+                &info,
+                src,
+                path_str,
+                size,
+                Outcome::SkippedEfficient,
+                &cancelled,
+                reporter,
+            );
+        }
+        Some(SkipKind::Marginal) => {
+            return skip_or_normalize(
+                ff,
+                cfg,
+                manifest,
+                &info,
+                src,
+                path_str,
+                size,
+                Outcome::SkippedMarginal,
+                &cancelled,
+                reporter,
+            );
+        }
+        None => {}
     }
 
     if cfg.dry_run {
@@ -252,10 +282,15 @@ pub fn process_file(
     let temp_dir = match temp_dir_for(src, cfg) {
         Ok(d) => d,
         Err(e) => {
-            set(manifest, path_str, Outcome::Failed, StatusUpdate {
-                error: Some(format!("temp dir: {e}")),
-                ..meta_upd(&info)
-            });
+            set(
+                manifest,
+                path_str,
+                Outcome::Failed,
+                StatusUpdate {
+                    error: Some(format!("temp dir: {e}")),
+                    ..meta_upd(&info)
+                },
+            );
             return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
         }
     };
@@ -263,19 +298,33 @@ pub fn process_file(
     // NB: we deliberately do not pre-check free space. If the drive fills, the
     // encode simply fails and the original is left untouched (retried next run) —
     // the size gate and verify keep every outcome safe either way.
-    let out = temp_dir.join(format!("sqz_{}.{}", uuid::Uuid::new_v4().simple(), cfg.container.ext()));
+    let out = temp_dir.join(format!(
+        "sqz_{}.{}",
+        uuid::Uuid::new_v4().simple(),
+        cfg.container.ext()
+    ));
     let args = build_args(cfg, &info, encoder, &out);
 
     // Staged early-abort judge, driven by ffmpeg progress ticks.
     let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));
-    let abort_pred = |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
+    let abort_pred =
+        |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
 
-    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     reporter.on_file_start(path_str, &name, info.duration, size);
 
     let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
     let encode_start = std::time::Instant::now();
-    let enc = run_encode(&ff.ffmpeg, &args, &cancelled, &mut on_progress, Some(&abort_pred));
+    let enc = run_encode(
+        &ff.ffmpeg,
+        &args,
+        &cancelled,
+        &mut on_progress,
+        Some(&abort_pred),
+    );
     let encode_ms = encode_start.elapsed().as_millis() as i64;
     reporter.on_file_end(path_str);
 
@@ -286,7 +335,10 @@ pub fn process_file(
 
     if enc.aborted {
         cleanup(&out);
-        let proj = enc.abort_projection.unwrap_or(AbortProjection { frac: 0.0, projected: 0.0 });
+        let proj = enc.abort_projection.unwrap_or(AbortProjection {
+            frac: 0.0,
+            projected: 0.0,
+        });
         let msg = format!(
             "aborted at {:.0}% — projected {} vs {} original",
             proj.frac * 100.0,
@@ -295,14 +347,21 @@ pub fn process_file(
         );
         // Even a no-gain file can be normalized to the target container.
         if cfg.normalize_container && !is_target_container(src, cfg) {
-            if let Some(r) = try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter) {
+            if let Some(r) = try_remux(
+                ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter,
+            ) {
                 return r;
             }
         }
-        set(manifest, path_str, Outcome::SkippedNoGain, StatusUpdate {
-            error: Some(msg.clone()),
-            ..meta_upd(&info)
-        });
+        set(
+            manifest,
+            path_str,
+            Outcome::SkippedNoGain,
+            StatusUpdate {
+                error: Some(msg.clone()),
+                ..meta_upd(&info)
+            },
+        );
         return ProcessResult::new(path_str, Outcome::SkippedNoGain).with_message(msg);
     }
 
@@ -310,12 +369,31 @@ pub fn process_file(
         cleanup(&out);
         let rc = enc.returncode.unwrap_or(-1);
         let tail: String = enc.stderr_tail.replace('\n', " ");
-        let tail_trim: String = tail.chars().rev().take(400).collect::<String>().chars().rev().collect();
-        set(manifest, path_str, Outcome::Failed, StatusUpdate {
-            error: Some(format!("ffmpeg rc={rc}: {tail_trim}")),
-            ..meta_upd(&info)
-        });
-        let short: String = tail.chars().rev().take(160).collect::<String>().chars().rev().collect();
+        let tail_trim: String = tail
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        set(
+            manifest,
+            path_str,
+            Outcome::Failed,
+            StatusUpdate {
+                error: Some(format!("ffmpeg rc={rc}: {tail_trim}")),
+                ..meta_upd(&info)
+            },
+        );
+        let short: String = tail
+            .chars()
+            .rev()
+            .take(160)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         return ProcessResult::new(path_str, Outcome::Failed)
             .with_message(format!("ffmpeg rc={rc}: {short}"));
     }
@@ -327,45 +405,65 @@ pub fn process_file(
         // error. The file may still be container-normalized (stream copy).
         if matches!(vr.reason, VerifyReason::NoGain | VerifyReason::QualityFloor) {
             if cfg.normalize_container && !is_target_container(src, cfg) {
-                if let Some(r) =
-                    try_remux(ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter)
-                {
+                if let Some(r) = try_remux(
+                    ff, cfg, manifest, &info, src, path_str, size, &cancelled, reporter,
+                ) {
                     return r;
                 }
             }
             let error = (vr.reason == VerifyReason::QualityFloor)
                 .then(|| format!("quality floor: {}", vr.detail));
-            set(manifest, path_str, Outcome::SkippedNoGain, StatusUpdate {
-                out_size: Some(vr.out_size),
-                error,
-                ..meta_upd(&info)
-            });
+            set(
+                manifest,
+                path_str,
+                Outcome::SkippedNoGain,
+                StatusUpdate {
+                    out_size: Some(vr.out_size),
+                    error,
+                    ..meta_upd(&info)
+                },
+            );
             return ProcessResult::new(path_str, Outcome::SkippedNoGain);
         }
-        set(manifest, path_str, Outcome::Failed, StatusUpdate {
-            error: Some(format!("verify {:?}: {}", vr.reason, vr.detail)),
-            ..meta_upd(&info)
-        });
+        set(
+            manifest,
+            path_str,
+            Outcome::Failed,
+            StatusUpdate {
+                error: Some(format!("verify {:?}: {}", vr.reason, vr.detail)),
+                ..meta_upd(&info)
+            },
+        );
         return ProcessResult::new(path_str, Outcome::Failed)
             .with_message(format!("verify {:?}", vr.reason));
     }
 
     if let Err(e) = super::replace::replace_original(cfg, src, &out) {
         cleanup(&out);
-        set(manifest, path_str, Outcome::Failed, StatusUpdate {
-            error: Some(format!("replace: {e}")),
-            ..meta_upd(&info)
-        });
+        set(
+            manifest,
+            path_str,
+            Outcome::Failed,
+            StatusUpdate {
+                error: Some(format!("replace: {e}")),
+                ..meta_upd(&info)
+            },
+        );
         return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
     }
 
     let saved = size as i64 - vr.out_size as i64;
-    set(manifest, path_str, Outcome::Done, StatusUpdate {
-        out_size: Some(vr.out_size),
-        saved_bytes: Some(saved),
-        encode_ms: Some(encode_ms),
-        ..meta_upd(&info)
-    });
+    set(
+        manifest,
+        path_str,
+        Outcome::Done,
+        StatusUpdate {
+            out_size: Some(vr.out_size),
+            saved_bytes: Some(saved),
+            encode_ms: Some(encode_ms),
+            ..meta_upd(&info)
+        },
+    );
 
     let mut result = ProcessResult::new(path_str, Outcome::Done);
     result.saved_bytes = saved;
@@ -384,57 +482,5 @@ pub fn scan_into_manifest(manifest: &Manifest, cfg: &Config, path: &Path) {
             cfg.force,
             cfg.retry_failed,
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use super::super::config::Codec;
-    use super::super::probe::MediaInfo;
-    use std::path::PathBuf;
-
-    fn info(codec: &str, height: Option<u32>, bpp_bitrate: Option<u64>) -> MediaInfo {
-        MediaInfo {
-            path: PathBuf::from("x.mkv"),
-            codec: Some(codec.into()),
-            width: Some(1920),
-            height,
-            pix_fmt: Some("yuv420p".into()),
-            duration: Some(60.0),
-            video_bitrate: bpp_bitrate,
-            fps: Some(30.0),
-            size: Some(50_000_000),
-            sub_codecs: vec![],
-            color_primaries: None,
-            color_transfer: None,
-            color_space: None,
-            color_range: None,
-            dolby_vision: false,
-        }
-    }
-
-    #[test]
-    fn already_efficient_matches_target_codec_under_cap() {
-        let cfg = Config { codec: Codec::Av1, max_height: 1080, ..Config::default() };
-        assert!(is_already_efficient(&cfg, &info("av1", Some(1080), None)));
-        assert!(!is_already_efficient(&cfg, &info("av1", Some(2160), None))); // too tall
-        assert!(!is_already_efficient(&cfg, &info("h264", Some(720), None))); // wrong codec
-    }
-
-    #[test]
-    fn downscale_targets_are_never_marginal() {
-        let cfg = Config { skip_marginal: true, max_height: 1080, ..Config::default() };
-        // 4K source → will downscale → always worth it regardless of bpp.
-        assert!(!predicted_marginal(&cfg, &info("h264", Some(2160), Some(1_000_000))));
-    }
-
-    #[test]
-    fn low_bpp_same_res_is_marginal() {
-        let cfg = Config { skip_marginal: true, marginal_bpp: 0.05, ..Config::default() };
-        // Very low bitrate → low bpp → marginal.
-        assert!(predicted_marginal(&cfg, &info("h264", Some(1080), Some(50_000))));
-        // High bitrate → high bpp → worth encoding.
-        assert!(!predicted_marginal(&cfg, &info("h264", Some(1080), Some(20_000_000))));
     }
 }

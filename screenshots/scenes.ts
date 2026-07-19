@@ -1,8 +1,11 @@
 // Canned IPC responses + scripted engine-event scenes for screenshotting the
 // real UI in a headless browser (no Tauri backend). Shapes mirror src/lib/types.
 
+import { emit } from "@tauri-apps/api/event";
+
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
+const TB = 1024 ** 4;
 const now = Math.floor(Date.now() / 1000);
 
 const enc = (name: string, family: string) => ({ name, family });
@@ -148,16 +151,131 @@ const HISTORY = {
   ],
 };
 
-// Files returned by the mocked "Add files" native picker on the Home scene.
+// A real library has hundreds of files; pad the curated rows above out to match
+// the status counts, so the filter pills, the paging total, and the stats all
+// agree (and the list shows realistic pagination) rather than "1–9 of 9".
+type Row = {
+  path: string;
+  status: string;
+  size: number | null;
+  src_codec: string | null;
+  height: number | null;
+  out_size: number | null;
+  saved_bytes: number | null;
+  error: string | null;
+  updated_at: number;
+};
+
+const SHOWS = [
+  "Breaking Bad", "The Expanse", "Chernobyl", "Fargo", "Severance", "Andor",
+  "The Bear", "Succession", "Better Call Saul", "Foundation", "Silo", "Cosmos",
+];
+const GEN_RES = [720, 1080, 1080, 1080, 1440, 2160];
+let seq = 0;
+
+function sizeFor(h: number, i: number): number {
+  const base = h >= 2160 ? 26 : h >= 1440 ? 10 : h >= 1080 ? 3.8 : 1.3; // GB
+  return Math.round(base * (0.8 + (i % 6) * 0.09) * GB);
+}
+
+// One generated TV-episode row. Season/episode derive uniquely from `seq`, so
+// every path is distinct (React-key safe) and updated_at strictly decreases.
+function genRow(status: string): Row {
+  const show = SHOWS[seq % SHOWS.length];
+  const season = 1 + Math.floor(seq / 24);
+  const ep = 1 + (seq % 24);
+  const height = GEN_RES[seq % GEN_RES.length];
+  const s = String(season).padStart(2, "0");
+  const e = String(ep).padStart(2, "0");
+  const path = `D:\\Media\\TV\\${show}\\S${s}E${e} ${height}p.mkv`;
+  const updated_at = now - 3600 * 3 - seq * 1500;
+  const size = sizeFor(height, seq);
+  seq += 1;
+  const base: Row = {
+    path, status, height, updated_at,
+    size, src_codec: null, out_size: null, saved_bytes: null, error: null,
+  };
+  switch (status) {
+    case "done": {
+      const codec = height >= 1080 ? (seq % 3 === 0 ? "hevc" : "h264") : "mpeg2video";
+      const out = Math.round(size * (0.42 + (seq % 4) * 0.03));
+      return { ...base, src_codec: codec, out_size: out, saved_bytes: size - out };
+    }
+    case "normalized": {
+      const out = Math.round(size * 0.98);
+      return { ...base, src_codec: "mpeg4", out_size: out, saved_bytes: size - out };
+    }
+    case "failed":
+      return {
+        ...base, size, height: null, src_codec: null,
+        error: "ffprobe: moov atom not found — file is truncated or still being written",
+      };
+    case "skipped_already_efficient":
+      return { ...base, src_codec: seq % 2 ? "hevc" : "av1", saved_bytes: 0 };
+    default: // skipped_no_gain, skipped_marginal
+      return { ...base, src_codec: "h264", saved_bytes: 0 };
+  }
+}
+
+function padRows(n: number, status: string) {
+  for (let i = 0; i < n; i += 1) (HISTORY.rows as Row[]).push(genRow(status));
+}
+
+// Counts above already sum to files_touched (317); pad each status to match.
+padRows(209, "done");
+padRows(11, "normalized");
+padRows(2, "failed");
+padRows(7, "skipped_no_gain");
+padRows(60, "skipped_already_efficient");
+padRows(19, "skipped_marginal");
+(HISTORY.rows as Row[]).sort((a, b) => b.updated_at - a.updated_at);
+
+// Folders returned by the mocked native picker on the Home scene (folders, so
+// the discovered-video count in the action bar is consistent with the sources).
 const HOME_INPUTS = [
-  "D:\\Media\\Movies\\Interstellar (2014) 2160p HDR.mkv",
-  "D:\\Media\\Movies\\Dune Part Two (2024) 2160p.mkv",
-  "D:\\Media\\TV\\The Expanse\\S04E06 - Displacement 1080p.mkv",
-  "D:\\Media\\TV\\Planet Earth II\\S01E01 - Islands 2160p.mkv",
+  "D:\\Media\\Movies",
+  "D:\\Media\\TV",
+  "D:\\Media\\Home Videos",
+  "D:\\Media\\Concerts",
 ];
 
+// Reclaimable-space projection for the Home scene. Tier 1 lands instantly from
+// project_reclaim; Tier 2 (with the per-bucket breakdown) is emitted right after
+// via the sqz-projection event, mirroring the real backend.
+const HOME_BUCKETS = [
+  { src_codec: "h264", height_band: "2160p", files: 42, candidate_bytes: Math.round(980 * GB), est_reclaimable_bytes: Math.round(610 * GB), est_skipped_files: 0, sample_size: 46, confidence: 0.7 },
+  { src_codec: "hevc", height_band: "2160p", files: 26, candidate_bytes: Math.round(720 * GB), est_reclaimable_bytes: Math.round(300 * GB), est_skipped_files: 0, sample_size: 33, confidence: 0.62 },
+  { src_codec: "h264", height_band: "1080p", files: 44, candidate_bytes: Math.round(430 * GB), est_reclaimable_bytes: Math.round(250 * GB), est_skipped_files: 2, sample_size: 128, confidence: 0.86 },
+  { src_codec: "h264", height_band: "1440p", files: 14, candidate_bytes: Math.round(210 * GB), est_reclaimable_bytes: Math.round(124 * GB), est_skipped_files: 0, sample_size: 18, confidence: 0.47 },
+  { src_codec: "mpeg4", height_band: "≤720p", files: 6, candidate_bytes: Math.round(60 * GB), est_reclaimable_bytes: Math.round(42 * GB), est_skipped_files: 0, sample_size: 7, confidence: 0.26 },
+  { src_codec: "hevc", height_band: "1080p", files: 0, candidate_bytes: 0, est_reclaimable_bytes: 0, est_skipped_files: 6, sample_size: 40, confidence: 0.67 },
+];
+const HOME_PROJECTION_T2 = {
+  tier: 2,
+  candidate_files: 140,
+  candidate_bytes: Math.round(2.54 * TB),
+  est_reclaimable_bytes: Math.round(1326 * GB),
+  est_skipped_files: 8,
+  buckets: HOME_BUCKETS,
+  based_on_history_rows: 214,
+  confidence: "good",
+  cold_start: false,
+};
+const HOME_PROJECTION_T1 = {
+  ...HOME_PROJECTION_T2,
+  tier: 1,
+  est_reclaimable_bytes: Math.round(1.4 * TB),
+  est_skipped_files: 0,
+  buckets: [],
+};
+
 /** Handle a mocked `invoke` for a given scene. */
-export function commandHandler(cmd: string, args: any, scene: string): unknown {
+export function commandHandler(
+  cmd: string,
+  args: any,
+  scene: string,
+  opts?: { locked?: boolean },
+): unknown {
   switch (cmd) {
     case "ffmpeg_status":
       return {
@@ -168,14 +286,33 @@ export function commandHandler(cmd: string, args: any, scene: string): unknown {
       };
     case "get_settings":
       return {};
+    case "lock_status":
+      return { configured: !!opts?.locked, locked: !!opts?.locked };
     case "is_running":
       return scene === "dashboard";
     case "detect_encoders":
       return DETECTION;
     case "scan_inputs":
-      return { count: 128, total_bytes: Math.round(812 * GB) };
-    case "get_history":
-      return HISTORY;
+      return { count: HOME_PROJECTION_T2.candidate_files, total_bytes: HOME_PROJECTION_T2.candidate_bytes };
+    case "project_reclaim":
+      // Tier 2 lands shortly after, once HomeView's listener is registered —
+      // exactly the two-tier flow the real backend runs.
+      setTimeout(() => void emit("sqz-projection", HOME_PROJECTION_T2), 150);
+      return HOME_PROJECTION_T1;
+    case "get_history": {
+      // Filter server-side like the real backend, so the paging total and the
+      // rows shown match the active filter (not a fixed sample).
+      const f = args?.filter ?? {};
+      let rows = HISTORY.rows as Row[];
+      if (Array.isArray(f.statuses) && f.statuses.length > 0) {
+        rows = rows.filter((r) => f.statuses.includes(r.status));
+      }
+      if (f.search) {
+        const q = String(f.search).toLowerCase();
+        rows = rows.filter((r) => r.path.toLowerCase().includes(q));
+      }
+      return { ...HISTORY, rows };
+    }
     case "plugin:dialog|open":
       return HOME_INPUTS;
     default:

@@ -9,6 +9,7 @@ import type {
   History,
   HistoryFilter,
   LockStatus,
+  ReclaimProjection,
   RunConfig,
   ScanResult,
 } from "./types";
@@ -17,6 +18,8 @@ export const api = {
   ffmpegStatus: () => invoke<FfStatus>("ffmpeg_status"),
   detectEncoders: () => invoke<Detection>("detect_encoders"),
   scanInputs: (inputs: string[]) => invoke<ScanResult>("scan_inputs", { inputs }),
+  projectReclaim: (config: RunConfig) =>
+    invoke<ReclaimProjection>("project_reclaim", { config }),
   startRun: (config: RunConfig) => invoke<void>("start_run", { config }),
   pauseRun: () => invoke<void>("pause_run"),
   resumeRun: () => invoke<void>("resume_run"),

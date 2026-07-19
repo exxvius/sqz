@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Collapsible } from "../components/Collapsible";
 import { DropZone } from "../components/DropZone";
 import { EncoderPanel } from "../components/EncoderPanel";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { QualityPresets } from "../components/QualityPresets";
+import { ReclaimBreakdown, ReclaimSummary } from "../components/ReclaimPanel";
 import { NumberField, Switch } from "../components/atoms";
 import { Select } from "../components/Select";
 import { api } from "../lib/api";
-import { humanBytes } from "../lib/format";
+import { EV } from "../lib/events";
 import { useStore } from "../lib/store";
 import { useLock } from "../lib/lock";
 import type {
@@ -16,9 +18,9 @@ import type {
   FfStatus,
   OnSuccess,
   Order,
+  ReclaimProjection,
   RunConfig,
   ScaleFilter,
-  ScanResult,
   VerifyDepth,
 } from "../lib/types";
 
@@ -72,8 +74,12 @@ const ORDER_OPTIONS: { value: Order; label: string }[] = [
 export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Props) {
   const store = useStore();
   const { locked, maskPath } = useLock();
-  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [proj, setProj] = useState<ReclaimProjection | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const [detailsH, setDetailsH] = useState(0);
 
   const patch = (p: Partial<RunConfig>) => setConfig({ ...config, ...p });
 
@@ -84,18 +90,52 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
   const removeInput = (path: string) =>
     patch({ inputs: config.inputs.filter((p) => p !== path) });
 
-  // Re-scan whenever the input set changes.
+  // Project reclaimable space whenever the input set — or any setting that
+  // changes what gets skipped/estimated — changes. Tier 1 lands instantly; the
+  // backend then refines it via a `sqz-projection` event. Debounced so dragging
+  // a slider doesn't launch a probe storm; the previous probe pass is cancelled
+  // backend-side the moment a new request arrives.
   useEffect(() => {
     if (config.inputs.length === 0) {
-      setScan(null);
+      setProj(null);
+      setScanning(false);
+      setRefining(false);
+      setDetailsOpen(false);
       return;
     }
-    setScanning(true);
-    api
-      .scanInputs(config.inputs)
-      .then(setScan)
-      .finally(() => setScanning(false));
-  }, [config.inputs]);
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+    const timer = setTimeout(async () => {
+      setScanning(true);
+      setRefining(true);
+      unlisten = await listen<ReclaimProjection>(EV.projection, (e) => {
+        if (!cancelled) {
+          setProj(e.payload);
+          setRefining(false);
+        }
+      });
+      try {
+        const tier1 = await api.projectReclaim(config);
+        if (!cancelled) setProj(tier1);
+      } finally {
+        if (!cancelled) setScanning(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    config.inputs,
+    config.codec,
+    config.max_height,
+    config.skip_marginal,
+    config.marginal_bpp,
+    config.skip_dolby_vision,
+    config.force,
+  ]);
 
   const start = async () => {
     await store.start(config);
@@ -103,7 +143,30 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
   };
 
   const ffReady = ff?.present ?? false;
-  const canStart = (scan?.count ?? 0) > 0 && !store.running && ffReady;
+  const hasProjection = (proj?.candidate_files ?? 0) > 0;
+  const canStart = hasProjection && !store.running && ffReady;
+  // The whole bar toggles the breakdown, but only once there's one to show.
+  const canToggleDetails = hasProjection && !!proj && proj.buckets.length > 0 && !refining;
+  const toggleDetails = () => {
+    if (canToggleDetails) setDetailsOpen((o) => !o);
+  };
+
+  // The breakdown card is absolutely positioned above the sticky bar, so it
+  // adds no scroll height on its own. Measure it while open and reserve that
+  // much extra space at the bottom of the view, so the settings behind it can
+  // always be scrolled clear of the expanded bar.
+  useLayoutEffect(() => {
+    const el = detailsRef.current;
+    if (!detailsOpen || !el) {
+      setDetailsH(0);
+      return;
+    }
+    const measure = () => setDetailsH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [detailsOpen, proj]);
 
   return (
     <div className="view">
@@ -476,23 +539,47 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
       </div>
       </fieldset>
 
-      <div className="actionbar">
-        <div>
-          {scanning ? (
+      {/* Reserve scroll room *above* the sticky dock for the open breakdown —
+          its height plus the card gap it floats above the bar by — so the
+          settings can be scrolled clear of it while the bar stays pinned. */}
+      {detailsH > 0 && (
+        <div aria-hidden="true" style={{ height: `calc(${detailsH}px + var(--space-4))` }} />
+      )}
+
+      <div className="actionbar-dock">
+        {detailsOpen && hasProjection && proj && (
+          <div className="actionbar-details" ref={detailsRef}>
+            <ReclaimBreakdown proj={proj} />
+          </div>
+        )}
+        <div
+          className={`actionbar${canToggleDetails ? " clickable" : ""}`}
+          onClick={toggleDetails}
+        >
+          {scanning && !proj ? (
             <span className="muted">Scanning…</span>
-          ) : scan ? (
-            <span>
-              <strong>{scan.count}</strong> video{scan.count === 1 ? "" : "s"} ·{" "}
-              <span className="muted">{humanBytes(scan.total_bytes)}</span>
-            </span>
+          ) : hasProjection && proj ? (
+            <ReclaimSummary
+              proj={proj}
+              refining={refining}
+              expanded={detailsOpen}
+              onToggle={toggleDetails}
+            />
           ) : (
             <span className="muted">Add sources to begin</span>
           )}
+          <div className="spacer" />
+          <button
+            className="btn primary lg"
+            disabled={!canStart || locked}
+            onClick={(e) => {
+              e.stopPropagation();
+              start();
+            }}
+          >
+            {config.dry_run ? "Preview run" : "Start squeezing"}
+          </button>
         </div>
-        <div className="spacer" />
-        <button className="btn primary lg" disabled={!canStart || locked} onClick={start}>
-          {config.dry_run ? "Preview run" : "Start squeezing"}
-        </button>
       </div>
     </div>
   );
