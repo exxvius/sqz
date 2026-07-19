@@ -72,6 +72,15 @@ fn decode_segment(
     if let Some(sec) = limit {
         cmd.args(["-t", &sec.to_string()]);
     }
+    // A tail seek (`-sseof`) lands mid-frame in compressed audio (e.g. AC3), so
+    // the decoder reports the first partial frame as corrupt and `-xerror`
+    // treats it as fatal — a false-positive DecodeError on otherwise-fine
+    // output. The tail probe only needs to catch truncated/garbled *video*, so
+    // drop audio for seeked decodes. Full audio integrity is the Checksummed
+    // depth's job (it decodes every stream from the start, without seeking).
+    if seek_from_end.is_some() {
+        cmd.arg("-an");
+    }
     cmd.args(["-f", "null", "-"]);
 
     let out = match cmd
