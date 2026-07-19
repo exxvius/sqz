@@ -70,15 +70,18 @@ function Shell() {
     let unlisten: (() => void) | undefined;
     win
       .onCloseRequested(async (event) => {
+        // Always take control of the close, then act explicitly. (Letting the
+        // default proceed relies on the window's internal destroy(), which needs
+        // a permission we don't grant — so we quit via the backend instead.)
+        event.preventDefault();
         if (behaviorRef.current === "tray") {
-          event.preventDefault();
           await win.hide();
         } else if (runningRef.current) {
           // Quitting mid-run: confirm first, offering the tray as an alternative.
-          event.preventDefault();
           setCloseWarn(true);
+        } else {
+          await api.quitApp();
         }
-        // Otherwise let the close proceed — the app exits.
       })
       .then((u) => (unlisten = u));
     return () => unlisten?.();
