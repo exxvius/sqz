@@ -13,7 +13,7 @@
 //! `(path, size, mtime, target)`, so a re-run never re-searches an unchanged file.
 
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -169,14 +169,20 @@ fn measure_cached(
     Some(v)
 }
 
-/// Resolve the per-title CRF for `info` that hits `target` VMAF, via sample-encode
-/// and `libvmaf` measurement. Returns `None` (caller falls back to preset quality)
-/// on cancellation or any measurement failure — never a hard error.
+/// Resolve the per-title CRF for `info` that hits `target` VMAF. Returns `None`
+/// (caller falls back to preset quality) on cancellation or any measurement
+/// failure — never a hard error.
 ///
-/// `on_progress(frac)` is called continuously (0.0–1.0) as the search runs — it
-/// advances smoothly *within* each sample-encode (from that sample's ffmpeg
-/// progress), not only when a sample finishes. `frac` is against a stable upper
-/// bound (max probes × samples), so it only moves forward and never overshoots.
+/// **Extract-once:** each window is decoded a single time into a frame-exact,
+/// output-resolution lossless-ish reference; every probe then encodes *that*
+/// reference and scores against it. Distorted and reference therefore share
+/// identical frames — no independent `-ss` re-seek drift, which previously made
+/// VMAF read far too low on high-motion/VFR sources (bottoming the search out at
+/// max quality). It also decodes the heavy source once, not per probe.
+///
+/// `on_progress(frac)` advances continuously (0.0–1.0) — through extraction and
+/// through each probe's encode+measure — against a stable upper bound, so it only
+/// moves forward.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_crf(
     ff: &FfBin,
@@ -195,37 +201,55 @@ pub fn resolve_crf(
         return None;
     }
     let bounds = bounds_for(cfg.codec);
-    // Total work units = one per sample across the worst-case number of probes.
-    let total_units = (max_probes(bounds) as usize * windows.len()) as f64;
+    let n = windows.len();
+    // Work units: one to extract each window's reference, then one per sample
+    // across the worst-case probe count.
+    let total_units = (n + max_probes(bounds) as usize * n) as f64;
     let completed = std::cell::Cell::new(0u32);
     on_progress(0.0);
 
+    // Phase 1 — extract each window's reference once (the heavy source decode).
+    let mut refs: Vec<(PathBuf, f64)> = Vec::with_capacity(n);
+    for &(start, len) in &windows {
+        if cancel() {
+            cleanup_refs(&refs);
+            return None;
+        }
+        let refp = temp_dir.join(format!("sqz_vref_{}.mkv", uuid::Uuid::new_v4().simple()));
+        let base = completed.get() as f64;
+        let mut on_ext = |p: f64| on_progress(((base + p) / total_units).min(0.999));
+        if !extract_ref(ff, cfg, encoder, info, start, len, &refp, cancel, &mut on_ext) {
+            let _ = std::fs::remove_file(&refp);
+            cleanup_refs(&refs);
+            return None;
+        }
+        refs.push((refp, len));
+        completed.set(completed.get() + 1);
+        on_progress((completed.get() as f64 / total_units).min(0.999));
+    }
+
+    // Phase 2 — search: encode each reference at the candidate CRF, score against
+    // that same reference (perfectly aligned).
     let measure = |crf: i32| -> Option<f64> {
         if cancel() {
             return None;
         }
-        let mut scores = Vec::with_capacity(windows.len());
-        for &(start, len) in windows.iter() {
+        let mut scores = Vec::with_capacity(refs.len());
+        for (refp, len) in &refs {
             if cancel() {
                 return None;
             }
-            let dist =
-                temp_dir.join(format!("sqz_vmaf_{}.mkv", uuid::Uuid::new_v4().simple()));
-            // Each sample is one unit; its ffmpeg progress fills the unit — the
-            // encode the first half, the VMAF measure the second — so the bar keeps
-            // moving through both phases instead of freezing during measurement.
+            let dist = temp_dir.join(format!("sqz_vmaf_{}.mkv", uuid::Uuid::new_v4().simple()));
             let base = completed.get() as f64;
-            let mut on_enc =
-                |p: f64| on_progress(((base + 0.5 * p) / total_units).min(0.999));
+            let mut on_enc = |p: f64| on_progress(((base + 0.5 * p) / total_units).min(0.999));
             let encoded =
-                encode_sample(ff, cfg, encoder, info, start, len, crf, &dist, cancel, &mut on_enc);
+                encode_from_ref(ff, cfg, encoder, info, refp, *len, crf, &dist, cancel, &mut on_enc);
             if !encoded {
                 let _ = std::fs::remove_file(&dist);
                 return None;
             }
-            let mut on_meas =
-                |p: f64| on_progress(((base + 0.5 + 0.5 * p) / total_units).min(0.999));
-            let score = measure_sample(ff, cfg, info, start, len, &dist, cancel, &mut on_meas);
+            let mut on_meas = |p: f64| on_progress(((base + 0.5 + 0.5 * p) / total_units).min(0.999));
+            let score = measure_pair(ff, refp, &dist, *len, cancel, &mut on_meas);
             let _ = std::fs::remove_file(&dist);
             let s = score?;
             completed.set(completed.get() + 1);
@@ -235,7 +259,16 @@ pub fn resolve_crf(
         (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64)
     };
 
-    search_crf(bounds, target, &measure)
+    let result = search_crf(bounds, target, &measure);
+    cleanup_refs(&refs);
+    result
+}
+
+/// Remove temp reference files, ignoring errors.
+fn cleanup_refs(refs: &[(PathBuf, f64)]) {
+    for (p, _) in refs {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 /// Spawn ffmpeg, streaming `-progress pipe:1` (stdout) into `on_sec` (seconds
@@ -332,20 +365,20 @@ fn hwaccel_args(cfg: &Config) -> &'static [&'static str] {
     }
 }
 
-/// Encode one sample window at `crf` into `out` (video only). Mirrors the real
-/// encode's scaling, rate control, and pixel format so the measured quality
-/// reflects what will ship. `report(p)` fires with this encode's progress (0–1)
-/// for a smoothly-advancing bar; aborts (killing ffmpeg) the moment `cancel`
-/// fires. Returns whether a non-empty output was produced.
+/// Extract one window from the (possibly huge) source ONCE into a frame-exact,
+/// output-resolution reference. Hardware-decodes the heavy source and applies the
+/// same downscale the real encode will, so the reference frames are exactly what
+/// the target encoder will see. Encoded near-losslessly (libx264 CRF 10 ultrafast)
+/// so it's small/fast yet a faithful VMAF reference, at the same pixel format the
+/// distorted encode will use. Streams progress; cancellable.
 #[allow(clippy::too_many_arguments)]
-fn encode_sample(
+fn extract_ref(
     ff: &FfBin,
     cfg: &Config,
     encoder: &Encoder,
     info: &MediaInfo,
     start: f64,
     len: f64,
-    crf: i32,
     out: &Path,
     cancel: &dyn Fn() -> bool,
     report: &mut dyn FnMut(f64),
@@ -381,8 +414,57 @@ fn encode_sample(
         a.push("-vf".into());
         a.push(software_scale_vf(cfg));
     }
-    a.push("-c:v".into());
-    a.push(encoder.name.clone());
+    a.extend(
+        ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-pix_fmt"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    a.push(pix_fmt(cfg, info, encoder).into());
+    a.push("-an".into());
+    a.push(out.to_string_lossy().into_owned());
+
+    let mut cmd = command_no_window(&ff.ffmpeg);
+    cmd.args(&a);
+    let span = len.max(0.001);
+    let mut on_sec = |sec: f64| report((sec / span).clamp(0.0, 1.0));
+    let ok = matches!(run_ff(cmd, cancel, &mut on_sec), Some((true, _)));
+    ok && std::fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+/// Encode a pre-extracted reference at `crf` with the target encoder (no scaling —
+/// the reference is already at output resolution and pixel format, exactly what the
+/// real encode ingests). Streams progress; cancellable.
+#[allow(clippy::too_many_arguments)]
+fn encode_from_ref(
+    ff: &FfBin,
+    cfg: &Config,
+    encoder: &Encoder,
+    info: &MediaInfo,
+    reference: &Path,
+    len: f64,
+    crf: i32,
+    out: &Path,
+    cancel: &dyn Fn() -> bool,
+    report: &mut dyn FnMut(f64),
+) -> bool {
+    let mut a: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-nostdin".into(),
+        "-y".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-nostats".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-stats_period".into(),
+        "0.2".into(),
+        "-i".into(),
+        reference.to_string_lossy().into_owned(),
+        "-map".into(),
+        "0:v:0".into(),
+        "-c:v".into(),
+        encoder.name.clone(),
+    ];
     a.extend(encoder_rate_args(cfg, encoder, crf));
     a.push("-pix_fmt".into());
     a.push(pix_fmt(cfg, info, encoder).into());
@@ -397,38 +479,24 @@ fn encode_sample(
     ok && std::fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
 }
 
-/// Measure VMAF of the distorted sample `dist` against the matching source
-/// window. Follows the SSIM convention in `verify.rs`: distorted is input 0,
-/// reference is input 1; the reference is scaled to the distorted geometry so the
-/// score reflects the shipped resolution. Multi-threaded, progress-streamed
-/// (`report`, 0–1), and cancellable mid-run.
-#[allow(clippy::too_many_arguments)]
-fn measure_sample(
+/// Score the distorted encode against its own reference — same frames, same
+/// resolution, so they're perfectly aligned (no scaling, no re-seek). Distorted is
+/// input 0, reference input 1 (ffmpeg's libvmaf convention, as in `verify.rs`).
+/// Multi-threaded; progress-streamed; cancellable.
+fn measure_pair(
     ff: &FfBin,
-    cfg: &Config,
-    info: &MediaInfo,
-    start: f64,
-    len: f64,
+    reference: &Path,
     dist: &Path,
+    len: f64,
     cancel: &dyn Fn() -> bool,
     report: &mut dyn FnMut(f64),
 ) -> Option<f64> {
-    let vmaf = format!("libvmaf=n_threads={}", vmaf_threads());
-    let filter = if needs_downscale(cfg, info) {
-        format!("[1:v]{}[ref];[0:v][ref]{vmaf}", software_scale_vf(cfg))
-    } else {
-        format!("[0:v][1:v]{vmaf}")
-    };
-
-    let hw = hwaccel_args(cfg);
+    let filter = format!("[0:v][1:v]libvmaf=n_threads={}", vmaf_threads());
     let mut cmd = command_no_window(&ff.ffmpeg);
-    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-progress", "pipe:1"])
-        .args(hw)
-        .arg("-i")
+    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-progress", "pipe:1", "-i"])
         .arg(dist)
-        .args(hw)
-        .args(["-ss", &format!("{start}"), "-t", &format!("{len}"), "-i"])
-        .arg(&info.path)
+        .arg("-i")
+        .arg(reference)
         .args(["-filter_complex", &filter, "-an", "-f", "null", "-"]);
 
     let span = len.max(0.001);
