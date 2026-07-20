@@ -197,7 +197,6 @@
 .view-head p {
   margin: var(--space-2) 0 0;
   color: var(--text-dim);
-  max-width: 60ch;
 }
 
 /* ---- Cards / surfaces ---- */
@@ -1443,6 +1442,62 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+/* ---- Saved libraries (Library view) ---- */
+/* A curated set the user wants to see at a glance — no scroll cap like .queue. */
+.lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.lib-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.lib-row:hover {
+  border-color: var(--border-strong);
+}
+.lib-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.lib-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-meta {
+  font-size: var(--text-xs);
+}
+.lib-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ---- Library editor modal ---- */
+.lib-editor {
+  max-width: 900px;
+  width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.lib-editor h2 {
+  font-size: var(--text-xl);
 }
 
 /* ---- Accent color picker (Settings → Appearance) ---- */

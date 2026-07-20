@@ -47,6 +47,10 @@ after the new copy has earned it:
 
 <div align="center">
 
+### Save libraries, re-run them anytime
+<img src="docs/images/feature-libraries.png" alt="Named libraries, each with its own encode profile, ready to re-run or health-check in one click" width="90%">
+<br><br><br>
+
 ### Codec and quality presets
 <img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="90%">
 <br><br><br>

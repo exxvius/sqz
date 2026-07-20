@@ -1,13 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusCard } from "../components/StatusCard";
 import { useConfirm } from "../components/ConfirmModal";
-import { DeepScanIcon, FolderIcon, PlayIcon, SearchIcon } from "../components/icons";
+import { LibraryEditor } from "../components/LibraryEditor";
+import {
+  DeepScanIcon,
+  FolderIcon,
+  LibraryIcon,
+  PlayIcon,
+  SearchIcon,
+} from "../components/icons";
 import { api, openFile, pickInputs, revealFile } from "../lib/api";
+import { defaultConfig } from "../lib/config";
 import { fileName, humanBytes, pct, relativeTime } from "../lib/format";
 import { healthMeta, statusMeta } from "../lib/status";
 import { useLock } from "../lib/lock";
 import { useStore } from "../lib/store";
-import type { HealthState, Library, RunConfig } from "../lib/types";
+import type { HealthState, Library, RunConfig, SavedLibrary } from "../lib/types";
+
+const CODEC_LABEL: Record<string, string> = { av1: "AV1", hevc: "HEVC", h264: "H.264" };
+const QUALITY_LABEL: Record<string, string> = {
+  "max-savings": "Max savings",
+  balanced: "Balanced",
+  "high-quality": "High quality",
+  "visually-lossless": "Visually lossless",
+};
+
+/** One-line "AV1 · Balanced · ≤1080p · MKV" summary of a library's profile. */
+function profileSummary(p: RunConfig): string {
+  const parts = [CODEC_LABEL[p.codec] ?? p.codec];
+  parts.push(p.vmaf_target != null ? `VMAF ${p.vmaf_target}` : QUALITY_LABEL[p.quality] ?? p.quality);
+  parts.push(p.max_height > 4320 ? "no cap" : `≤${p.max_height}p`);
+  parts.push(p.container.toUpperCase());
+  return parts.join(" · ");
+}
 
 const HEALTH_CHIPS: { id: HealthState; label: string }[] = [
   { id: "healthy", label: "Healthy" },
@@ -40,6 +65,14 @@ export function LibraryView({ config }: { config: RunConfig }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [filters, setFilters] = useState<Set<HealthState>>(new Set());
+  const [libraries, setLibraries] = useState<SavedLibrary[]>([]);
+  const [editing, setEditing] = useState<SavedLibrary | null>(null);
+
+  const refreshLibraries = useCallback(() => {
+    api.listLibraries().then(setLibraries);
+  }, []);
+
+  useEffect(refreshLibraries, [refreshLibraries]);
 
   useEffect(() => {
     localStorage.setItem(ROOTS_KEY, JSON.stringify(roots));
@@ -73,6 +106,47 @@ export function LibraryView({ config }: { config: RunConfig }) {
   const runScan = (deep: boolean) => {
     if (roots.length === 0 || scanning) return;
     store.startScan({ ...config, inputs: roots }, deep);
+  };
+
+  // A library encodes to its own embedded profile: profile + roots → the
+  // existing run/scan paths.
+  const runLibrary = (lib: SavedLibrary) => {
+    if (store.running) return;
+    store.start({ ...lib.profile, inputs: lib.roots });
+  };
+  const scanLibrary = (lib: SavedLibrary, deep: boolean) => {
+    if (scanning) return;
+    store.startScan({ ...lib.profile, inputs: lib.roots }, deep);
+  };
+
+  const newLibrary = (): SavedLibrary => ({
+    id: "",
+    name: "",
+    roots: [],
+    profile: { ...defaultConfig(), inputs: [] },
+    created_at: 0,
+    updated_at: 0,
+  });
+
+  // "Save as library" captures the current ad-hoc folders + active config.
+  const saveCurrentAsLibrary = () =>
+    setEditing({ ...newLibrary(), roots, profile: { ...config, inputs: [] } });
+
+  const saveLibrary = async (lib: SavedLibrary) => {
+    await api.saveLibrary(lib);
+    refreshLibraries();
+  };
+
+  const removeLibrary = async (lib: SavedLibrary) => {
+    const ok = await confirm({
+      title: "Delete library",
+      message: `Delete the "${lib.name}" library? This removes the saved folders and profile only — your files and their history are untouched.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    await api.deleteLibrary(lib.id);
+    refreshLibraries();
   };
 
   const toggle = (id: HealthState) =>
@@ -127,8 +201,9 @@ export function LibraryView({ config }: { config: RunConfig }) {
       <div className="view-head">
         <h2>Library</h2>
         <p>
-          A health check for your media folders. Point sqz at a folder and scan to flag corrupt or
-          unreadable files — no re-encoding. Files you scan show up here.
+          Save your media folders as named libraries, each with its own encode profile (movies vs.
+          phone clips vs. VR), and re-run or health-check them in one click. Scanning flags corrupt
+          or unreadable files without re-encoding; scanned files show up below.
         </p>
       </div>
 
@@ -153,6 +228,63 @@ export function LibraryView({ config }: { config: RunConfig }) {
         </div>
       </div>
 
+      {!locked && (
+        <div className="card card-flat">
+          <div className="history-toolbar">
+            <h3 style={{ margin: 0, fontSize: "var(--text-lg)" }}>Saved libraries</h3>
+            <div className="grow" />
+            <button className="mini-btn" onClick={() => setEditing(newLibrary())}>
+              <LibraryIcon /> New library
+            </button>
+          </div>
+
+          {libraries.length === 0 ? (
+            <p className="muted" style={{ margin: "var(--space-3) 0 0" }}>
+              Save a folder set with its own encode target (movies vs. phone clips), then re-run it
+              in one click. Add folders below and choose “Save as library”, or start a new one.
+            </p>
+          ) : (
+            <div className="lib-list" style={{ marginTop: "var(--space-3)" }}>
+              {libraries.map((lib) => (
+                <div className="lib-row" key={lib.id}>
+                  <div className="lib-row-main">
+                    <span className="lib-name">{lib.name}</span>
+                    <span className="muted lib-meta">
+                      {lib.roots.length} folder{lib.roots.length === 1 ? "" : "s"} ·{" "}
+                      {profileSummary(lib.profile)}
+                    </span>
+                  </div>
+                  <div className="lib-row-actions">
+                    <button
+                      className="mini-btn"
+                      onClick={() => runLibrary(lib)}
+                      disabled={store.running || lib.roots.length === 0}
+                      title="Encode this library with its profile"
+                    >
+                      <PlayIcon /> Run
+                    </button>
+                    <button
+                      className="mini-btn"
+                      onClick={() => scanLibrary(lib, false)}
+                      disabled={scanning || lib.roots.length === 0}
+                      title="Health-scan this library's folders"
+                    >
+                      <SearchIcon /> Scan
+                    </button>
+                    <button className="mini-btn" onClick={() => setEditing(lib)}>
+                      Edit
+                    </button>
+                    <button className="mini-btn danger" onClick={() => removeLibrary(lib)}>
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {locked ? (
         <div className="card card-flat">
           <div className="empty">Scanning is disabled while the app is locked.</div>
@@ -163,6 +295,16 @@ export function LibraryView({ config }: { config: RunConfig }) {
             <button className="mini-btn" onClick={addFolders} disabled={scanning}>
               <FolderIcon /> Add folder
             </button>
+            {roots.length > 0 && (
+              <button
+                className="mini-btn"
+                onClick={saveCurrentAsLibrary}
+                disabled={scanning}
+                title="Save these folders and the current settings as a named library"
+              >
+                <LibraryIcon /> Save as library
+              </button>
+            )}
             <div className="grow" />
             {!scanning && flagged > 0 && (
               <span className="muted">
@@ -387,6 +529,13 @@ export function LibraryView({ config }: { config: RunConfig }) {
           </div>
         )}
       </div>
+      {editing && (
+        <LibraryEditor
+          initial={editing}
+          onSave={saveLibrary}
+          onClose={() => setEditing(null)}
+        />
+      )}
       {confirmModal}
     </div>
   );

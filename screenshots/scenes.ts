@@ -2,6 +2,7 @@
 // real UI in a headless browser (no Tauri backend). Shapes mirror src/lib/types.
 
 import { emit } from "@tauri-apps/api/event";
+import { defaultConfig } from "../src/lib/config";
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -269,6 +270,52 @@ const HOME_PROJECTION_T1 = {
   buckets: [],
 };
 
+// Saved libraries for the Library scene — a named folder set + its own embedded
+// encode profile (the re-runnable unit unattended mode binds to). Movies, phone
+// clips, and a VR library each target something different.
+const prof = (o: Record<string, unknown>) => ({ ...defaultConfig(), inputs: [], ...o });
+const NO_CAP = 20000; // resolution-cap sentinel: never downscale
+const LIBRARIES = [
+  {
+    // Big files, target a perceptual quality rather than guessing a CRF.
+    id: "lib-movies",
+    name: "Movies",
+    roots: ["D:\\Media\\Movies"],
+    profile: prof({ codec: "av1", vmaf_target: 95, max_height: 1080, container: "mkv" }),
+    created_at: now - 86400 * 41,
+    updated_at: now - 3600 * 6,
+  },
+  {
+    // Home camera captures — preserve the originals: keep full resolution and a
+    // fixed high-quality preset, no perceptual auto-search.
+    id: "lib-home",
+    name: "Home videos",
+    roots: ["D:\\DCIM\\Camera", "E:\\Home Videos"],
+    profile: prof({ codec: "hevc", quality: "high-quality", max_height: NO_CAP, container: "mkv" }),
+    created_at: now - 86400 * 18,
+    updated_at: now - 3600 * 30,
+  },
+  {
+    // YouTube rips are already low-bitrate — chase max savings and skip the ones
+    // that won't shrink.
+    id: "lib-youtube",
+    name: "YouTube downloads",
+    roots: ["D:\\Media\\YouTube"],
+    profile: prof({ codec: "av1", quality: "max-savings", max_height: 1080, container: "mp4", skip_marginal: true }),
+    created_at: now - 86400 * 9,
+    updated_at: now - 3600 * 20,
+  },
+  {
+    // Series — balanced, capped at 1080p.
+    id: "lib-tv",
+    name: "TV shows",
+    roots: ["D:\\Media\\TV"],
+    profile: prof({ codec: "av1", quality: "balanced", max_height: 1080, container: "mkv" }),
+    created_at: now - 86400 * 5,
+    updated_at: now - 1800,
+  },
+];
+
 /** Handle a mocked `invoke` for a given scene. */
 export function commandHandler(
   cmd: string,
@@ -313,6 +360,14 @@ export function commandHandler(
       }
       return { ...HISTORY, rows };
     }
+    case "list_libraries":
+      return LIBRARIES;
+    case "get_library":
+      // The saved-libraries panel is the subject; the scanned-file list below it
+      // isn't in-frame, so a minimal payload is enough.
+      return { counts: {}, rows: [] };
+    case "save_library":
+      return args?.lib ?? null;
     case "plugin:dialog|open":
       return HOME_INPUTS;
     default:
@@ -374,6 +429,7 @@ async function record(
 export const scenes: Record<string, (emit: Emit) => Promise<void>> = {
   home: async () => {},
   history: async () => {},
+  library: async () => {},
   dashboard: async (emit) => {
     await emit("sqz-run-start", { total: 142 });
 

@@ -17,6 +17,7 @@ use crate::core::encoders::{self, Detection};
 use crate::core::estimate::{self, ProbedFile, ReclaimProjection};
 use crate::core::ffbin::FfBin;
 use crate::core::health::{classify, HealthState};
+use crate::core::library::{self, SavedLibrary};
 use crate::core::lock::Lock;
 use crate::core::manifest::{mtime_secs, HistoryQuery, HistoryRow, LibraryRow, Manifest};
 use crate::core::paths::holding_path_for;
@@ -85,6 +86,10 @@ impl AppState {
 
     fn settings_path(&self) -> PathBuf {
         self.data_dir.join("settings.json")
+    }
+
+    fn libraries_path(&self) -> PathBuf {
+        self.data_dir.join("libraries.json")
     }
 }
 
@@ -913,6 +918,39 @@ pub async fn delete_library_paths(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The saved libraries, in stored order. Read-only; paths are masked by the UI
+/// under lock (same as the ad-hoc Library roots), so this stays available locked.
+#[tauri::command]
+pub fn list_libraries(state: State<'_, AppState>) -> Vec<SavedLibrary> {
+    library::load_all(&state.libraries_path())
+}
+
+/// Create or update a saved library. Assigns an id/timestamps on first save,
+/// strips profile inputs, and validates the encode target before persisting.
+/// Echoes the stored row back so the UI learns the assigned id.
+#[tauri::command]
+pub fn save_library(
+    lib: SavedLibrary,
+    state: State<'_, AppState>,
+) -> Result<SavedLibrary, String> {
+    guard_locked(&state)?;
+    let normalized = lib.normalized()?;
+    let path = state.libraries_path();
+    let libs = library::upsert(library::load_all(&path), normalized.clone());
+    library::save_all(&path, &libs)?;
+    Ok(normalized)
+}
+
+/// Delete the saved library with `id`. Never touches the manifest, so a library's
+/// scanned/encoded files keep their History and health rows.
+#[tauri::command]
+pub fn delete_library(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
+    let path = state.libraries_path();
+    let libs = library::remove(library::load_all(&path), &id);
+    library::save_all(&path, &libs)
 }
 
 #[tauri::command]

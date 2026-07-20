@@ -13,6 +13,7 @@ import type {
   LockStatus,
   ReclaimProjection,
   RunConfig,
+  SavedLibrary,
   ScanResult,
 } from "./types";
 
@@ -27,6 +28,9 @@ export const api = {
   getLibrary: (filter: HistoryFilter = {}) => invoke<Library>("get_library", { filter }),
   deleteLibraryPaths: (paths: string[]) =>
     invoke<number>("delete_library_paths", { paths }),
+  listLibraries: () => invoke<SavedLibrary[]>("list_libraries"),
+  saveLibrary: (lib: SavedLibrary) => invoke<SavedLibrary>("save_library", { lib }),
+  deleteLibrary: (id: string) => invoke<void>("delete_library", { id }),
   startRun: (config: RunConfig) => invoke<void>("start_run", { config }),
   pauseRun: () => invoke<void>("pause_run"),
   resumeRun: () => invoke<void>("resume_run"),

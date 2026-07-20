@@ -404,6 +404,59 @@ async function disposal() {
 }
 
 // ---------------------------------------------------------------------------
+// 10. Saved libraries — the saved-libraries panel, with the creation modal
+//     below it receding into the distance (perspective tilt) and dissolving
+//     into a blur partway down, as if it's opening out of the panel.
+// ---------------------------------------------------------------------------
+async function savedLibraries() {
+  const page = await open({ scene: "library", nav: "Library", waitSel: ".lib-row" });
+  // The saved-libraries panel is the first flat card in the Library view.
+  const panel = await grab(page, ".card.card-flat", { index: 0, opaque: true });
+  // Open the Home-videos library's editor to capture a populated edit modal
+  // (two folders, preset mode, no downscaling — the memory-preserving profile).
+  await page.locator(".lib-row", { hasText: "Home videos" }).getByRole("button", { name: "Edit", exact: true }).click();
+  await page.waitForSelector(".lib-editor", { timeout: 8000 });
+  await page.waitForTimeout(300);
+  const modal = await grab(page, ".lib-editor", { opaque: true });
+  await page.close();
+
+  const M = 40;
+  const GAP = 18;
+  const CROP = 600; // px of the modal top kept before it dissolves
+  const THETA = 32; // degrees of backward tilt (bottom recedes)
+  const P = 1500; // perspective depth
+  const contentW = Math.max(panel.w, modal.w);
+  const panelX = M + (contentW - panel.w) / 2;
+  const modalX = M + (contentW - modal.w) / 2;
+  const modalTop = M + panel.h + GAP;
+
+  // Where the (masked) modal content projects to on screen, so the stage is
+  // just tall enough to hold the visible part and its faded tail.
+  const th = (THETA * Math.PI) / 180;
+  const proj = (yl) => (yl * Math.cos(th) * P) / (P + yl * Math.sin(th));
+  const visH = Math.round(proj(CROP * 0.94)) + 14;
+
+  const img = (blur, stops) =>
+    `<img src="${modal.src}" style="position:absolute;left:0;top:0;width:${modal.w}px;height:${modal.h}px;` +
+    `display:block;${blur ? "filter:blur(7px);" : ""}` +
+    `-webkit-mask-image:linear-gradient(to bottom,${stops});mask-image:linear-gradient(to bottom,${stops});">`;
+
+  const warp =
+    `<div style="position:absolute;left:${modalX}px;top:${modalTop}px;width:${modal.w}px;height:${CROP}px;` +
+    `overflow:hidden;border-radius:${modal.r}px ${modal.r}px 0 0;` +
+    // Negative rotateX about the top edge tips the BOTTOM away from the camera
+    // (recedes, narrows) — a positive angle would tip it toward the viewer.
+    `transform:perspective(${P}px) rotateX(-${THETA}deg);transform-origin:top center;">` +
+    // Sharp top → fades out by ~470px; blurred layer takes over through the fade.
+    img(false, "#000 0px,#000 300px,transparent 470px") +
+    img(true, "transparent 250px,#000 380px,transparent 560px") +
+    `</div>`;
+
+  const inner = place(panel, { x: panelX, y: M }) + warp;
+  await save("feature-libraries.png", await stage({ w: contentW + 2 * M, h: modalTop + visH + M, inner }));
+}
+
+// ---------------------------------------------------------------------------
 
 await mkdir(OUT, { recursive: true });
 await live();
@@ -415,6 +468,7 @@ await projection();
 await encoders();
 await presets();
 await disposal();
+await savedLibraries();
 
 await browser.close();
 console.log("done");

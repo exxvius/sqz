@@ -179,6 +179,20 @@ export interface Library {
   rows: LibraryRow[];
 }
 
+/**
+ * A named folder set with its own embedded encode profile. The re-runnable unit
+ * 1.2.0's unattended mode binds to. `profile` is a `RunConfig` with `inputs`
+ * cleared — running the library is `{ ...profile, inputs: roots }`.
+ */
+export interface SavedLibrary {
+  id: string;
+  name: string;
+  roots: string[];
+  profile: RunConfig;
+  created_at: number;
+  updated_at: number;
+}
+
 /** Tally returned when a health scan finishes. */
 export interface HealthSummary {
   scanned: number;
