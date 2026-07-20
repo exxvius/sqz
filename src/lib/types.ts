@@ -109,6 +109,9 @@ export interface RunConfig {
   audio_bitrate_kbps: number;
   verify_depth: VerifyDepth;
   ssim_floor?: number | null;
+  /** VMAF quality mode: target a perceptual quality (0–100) instead of a fixed
+   *  CRF. `null` = off (preset mode). */
+  vmaf_target?: number | null;
   skip_dolby_vision: boolean;
   order: Order;
   paranoid: boolean;
@@ -259,6 +262,20 @@ export interface FileProgress {
 }
 export interface FileEnd {
   path: string;
+}
+/** Progress through the VMAF sample-encode search for a file (before its encode). */
+export interface QualityProgress {
+  path: string;
+  done: number;
+  total: number;
+}
+/** VMAF mode resolved a per-title CRF for a file (before its full encode). */
+export interface QualityResolved {
+  path: string;
+  target: number;
+  crf: number;
+  /** Measured VMAF at `crf`, or null on a cache hit. */
+  vmaf: number | null;
 }
 
 export interface LockStatus {

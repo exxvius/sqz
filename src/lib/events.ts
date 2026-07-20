@@ -8,6 +8,8 @@ import type {
   HealthProgress,
   HealthSummary,
   ProcessResult,
+  QualityProgress,
+  QualityResolved,
   RunSummary,
 } from "./types";
 
@@ -18,6 +20,8 @@ export const EV = {
   fileRecord: "sqz-file-record",
   runStart: "sqz-run-start",
   runDone: "sqz-run-done",
+  qualityProgress: "sqz-quality-progress",
+  qualityResolved: "sqz-quality-resolved",
   projection: "sqz-projection",
   healthProgress: "sqz-health-progress",
   healthDone: "sqz-health-done",
@@ -39,6 +43,8 @@ export interface EngineHandlers {
   onFileStart?: (p: FileStart) => void;
   onFileProgress?: (p: FileProgress) => void;
   onFileEnd?: (p: FileEnd) => void;
+  onQualityProgress?: (p: QualityProgress) => void;
+  onQualityResolved?: (p: QualityResolved) => void;
   onRecord?: (p: ProcessResult) => void;
   onRunStart?: (total: number) => void;
   onRunDone?: (p: RunSummary) => void;
@@ -50,6 +56,8 @@ export async function subscribeEngine(h: EngineHandlers): Promise<UnlistenFn> {
     listen<FileStart>(EV.fileStart, (e) => h.onFileStart?.(e.payload)),
     listen<FileProgress>(EV.fileProgress, (e) => h.onFileProgress?.(e.payload)),
     listen<FileEnd>(EV.fileEnd, (e) => h.onFileEnd?.(e.payload)),
+    listen<QualityProgress>(EV.qualityProgress, (e) => h.onQualityProgress?.(e.payload)),
+    listen<QualityResolved>(EV.qualityResolved, (e) => h.onQualityResolved?.(e.payload)),
     listen<ProcessResult>(EV.fileRecord, (e) => h.onRecord?.(e.payload)),
     listen<{ total: number }>(EV.runStart, (e) => h.onRunStart?.(e.payload.total)),
     listen<RunSummary>(EV.runDone, (e) => h.onRunDone?.(e.payload)),

@@ -60,7 +60,14 @@ fn compute_ssim(ffmpeg: &Path, src_path: &Path, out_path: &Path) -> Option<f64> 
         .arg(out_path)
         .arg("-i")
         .arg(src_path)
-        .args(["-filter_complex", "[0:v][1:v]ssim", "-an", "-f", "null", "-"]);
+        .args([
+            "-filter_complex",
+            "[0:v][1:v]ssim",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ]);
     let out = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -121,7 +128,7 @@ pub fn verify_output(
     // 3b) Optional perceptual-quality floor (SSIM). Only meaningful when the
     // output kept the source's dimensions — a deliberate downscale changes the
     // geometry, so SSIM would be misleading and is skipped.
-    if let Some(floor) = cfg.ssim_floor {
+    if let Some(floor) = cfg.effective_ssim_floor() {
         let same_geometry = src.width == out_info.width && src.height == out_info.height;
         if same_geometry {
             match compute_ssim(ffmpeg, &src.path, out_path) {

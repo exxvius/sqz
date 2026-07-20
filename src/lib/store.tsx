@@ -16,6 +16,8 @@ import type {
   FileProgress,
   HealthProgress,
   ProcessResult,
+  QualityProgress,
+  QualityResolved,
   RunConfig,
   RunSummary,
 } from "./types";
@@ -34,6 +36,11 @@ export interface ActiveFile {
   bitrateKbps: number | null;
   /** Recent projected final sizes, for the trend indicator. */
   projections: number[];
+  /** VMAF-mode quality resolution, e.g. "VMAF 95 → CRF 32". Null in preset mode. */
+  qualityNote: string | null;
+  /** VMAF sample-search progress (0–1) before the real encode; null when not
+   *  searching (preset mode, or once the encode has started). */
+  searchFrac: number | null;
 }
 
 export interface LogEntry {
@@ -76,6 +83,8 @@ type Action =
   | { type: "RUN_START"; minSavings: number; total: number }
   | { type: "FILE_START"; path: string; name: string; duration: number | null; srcSize: number }
   | { type: "FILE_PROGRESS"; p: FileProgress }
+  | { type: "QUALITY_PROGRESS"; p: QualityProgress }
+  | { type: "QUALITY_RESOLVED"; p: QualityResolved }
   | { type: "FILE_END"; path: string }
   | { type: "RECORD"; result: ProcessResult }
   | { type: "RUN_DONE"; summary: RunSummary }
@@ -149,6 +158,8 @@ function reducer(state: State, action: Action): State {
             speed: null,
             bitrateKbps: null,
             projections: [],
+            qualityNote: null,
+            searchFrac: null,
           },
         },
       };
@@ -175,7 +186,38 @@ function reducer(state: State, action: Action): State {
             speed: action.p.speed,
             bitrateKbps: action.p.bitrate_kbps,
             projections,
+            // A real encode tick means the search is over; hand the bar back.
+            searchFrac: null,
           },
+        },
+      };
+    }
+    case "QUALITY_PROGRESS": {
+      const f = state.active[action.p.path];
+      if (!f) return state;
+      const { done, total } = action.p;
+      // Hold just under 1 so the bar reads as "still working" until the encode
+      // takes over — it never implies the search is 100% done.
+      const frac = total > 0 ? Math.min(done / total, 0.99) : 0;
+      return {
+        ...state,
+        active: { ...state.active, [action.p.path]: { ...f, searchFrac: frac } },
+      };
+    }
+    case "QUALITY_RESOLVED": {
+      const f = state.active[action.p.path];
+      if (!f) return state;
+      const { target, crf, vmaf } = action.p;
+      const note =
+        vmaf != null
+          ? `VMAF ${target} → CRF ${crf} (${vmaf.toFixed(1)})`
+          : `VMAF ${target} → CRF ${crf} (cached)`;
+      // Search done; the real encode is about to drive the bar.
+      return {
+        ...state,
+        active: {
+          ...state.active,
+          [action.p.path]: { ...f, qualityNote: note, searchFrac: null },
         },
       };
     }
@@ -270,6 +312,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           srcSize: p.src_size,
         }),
       onFileProgress: (p) => dispatch({ type: "FILE_PROGRESS", p }),
+      onQualityProgress: (p) => dispatch({ type: "QUALITY_PROGRESS", p }),
+      onQualityResolved: (p) => dispatch({ type: "QUALITY_RESOLVED", p }),
       onFileEnd: (p) => dispatch({ type: "FILE_END", path: p.path }),
       onRecord: (r) => dispatch({ type: "RECORD", result: r }),
       onRunDone: (s) => dispatch({ type: "RUN_DONE", summary: s }),

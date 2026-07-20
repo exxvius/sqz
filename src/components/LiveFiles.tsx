@@ -60,6 +60,7 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
     <div>
       {active.map((f) => {
         const d = projify(f, minSavings);
+        const searching = f.searchFrac != null;
         return (
           <div className="live-card" key={f.path}>
             <div className="live-top">
@@ -73,10 +74,22 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
               )}
             </div>
 
-            <div className="bar tall" style={{ "--p": d.progress } as CSSProperties}>
-              <span className={d.klass} />
+            {searching ? (
+              <div className="live-quality searching">
+                Finding best quality… {pct(f.searchFrac ?? 0)}
+              </div>
+            ) : (
+              f.qualityNote && <div className="live-quality">{f.qualityNote}</div>
+            )}
+
+            <div
+              className={`bar tall${searching ? " searching" : ""}`}
+              style={{ "--p": searching ? (f.searchFrac ?? 0) : d.progress } as CSSProperties}
+            >
+              <span className={searching ? "search" : d.klass} />
             </div>
 
+            {searching ? null : (
             <div className="live-stats">
               <Stat k="progress" v={pct(d.progress)} />
               <Stat k="source" v={humanBytes(f.srcSize)} />
@@ -112,6 +125,7 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
               <Stat k="fps" v={f.fps != null ? f.fps.toFixed(0) : "—"} />
               <Stat k="eta" v={d.eta != null ? fmtDuration(d.eta) : "—"} />
             </div>
+            )}
           </div>
         );
       })}

@@ -73,6 +73,13 @@ pub trait Reporter: Send + Sync {
     fn on_file_start(&self, path: &str, name: &str, duration: Option<f64>, src_size: u64);
     /// One ffmpeg progress tick for the file.
     fn on_file_progress(&self, path: &str, sample: super::encode::ProgressSample);
+    /// Progress through the VMAF sample-encode search for `path`, before the real
+    /// encode: `done` of `total` sample-encodes complete. Only fired in VMAF mode.
+    fn on_search_progress(&self, path: &str, done: u32, total: u32);
+    /// VMAF mode resolved a per-title CRF for `path` before the full encode.
+    /// `vmaf` is the measured score at `crf`, or `None` on a cache hit (no fresh
+    /// measurement). Only fired in VMAF quality mode.
+    fn on_quality_resolved(&self, path: &str, target: f64, crf: i32, vmaf: Option<f64>);
     /// The file's active progress bar can be cleared.
     fn on_file_end(&self, path: &str);
     /// A file reached a terminal outcome (append to the event log / stats).
@@ -86,6 +93,8 @@ impl Reporter for NoopReporter {
     fn on_run_start(&self, _: usize) {}
     fn on_file_start(&self, _: &str, _: &str, _: Option<f64>, _: u64) {}
     fn on_file_progress(&self, _: &str, _: super::encode::ProgressSample) {}
+    fn on_search_progress(&self, _: &str, _: u32, _: u32) {}
+    fn on_quality_resolved(&self, _: &str, _: f64, _: i32, _: Option<f64>) {}
     fn on_file_end(&self, _: &str) {}
     fn on_record(&self, _: &ProcessResult) {}
 }

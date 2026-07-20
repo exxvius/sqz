@@ -24,6 +24,7 @@ pub mod replace;
 pub mod report;
 pub mod util;
 pub mod verify;
+pub mod vmaf;
 
 pub use config::{Codec, Config, OnSuccess, QualityPreset};
 pub use encoders::{Detection, Encoder, EncoderFamily};

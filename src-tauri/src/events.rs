@@ -17,6 +17,10 @@ pub const EV_RUN_DONE: &str = "sqz-run-done";
 /// Tier-2 (probe-refined) reclaimable-space projection, emitted after a
 /// `project_reclaim` call finishes its background probe pass.
 pub const EV_PROJECTION: &str = "sqz-projection";
+/// Progress through the VMAF sample-encode search for a file (before its encode).
+pub const EV_QUALITY_PROGRESS: &str = "sqz-quality-progress";
+/// VMAF quality mode resolved a per-title CRF for a file (before its full encode).
+pub const EV_QUALITY_RESOLVED: &str = "sqz-quality-resolved";
 /// Per-file progress during a library health scan.
 pub const EV_HEALTH_PROGRESS: &str = "sqz-health-progress";
 /// Emitted once when a health scan finishes (payload: the run's summary).
@@ -48,6 +52,22 @@ pub struct FileProgress {
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEnd {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QualityProgress {
+    pub path: String,
+    pub done: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QualityResolved {
+    pub path: String,
+    pub target: f64,
+    pub crf: i32,
+    /// Measured VMAF at `crf`, or `None` on a cache hit.
+    pub vmaf: Option<f64>,
 }
 
 /// Emits engine callbacks as Tauri events. Cheap and thread-safe (`AppHandle`
@@ -89,6 +109,29 @@ impl Reporter for TauriReporter {
                 fps: sample.fps,
                 speed: sample.speed,
                 bitrate_kbps: sample.bitrate_kbps,
+            },
+        );
+    }
+
+    fn on_search_progress(&self, path: &str, done: u32, total: u32) {
+        let _ = self.app.emit(
+            EV_QUALITY_PROGRESS,
+            QualityProgress {
+                path: path.to_string(),
+                done,
+                total,
+            },
+        );
+    }
+
+    fn on_quality_resolved(&self, path: &str, target: f64, crf: i32, vmaf: Option<f64>) {
+        let _ = self.app.emit(
+            EV_QUALITY_RESOLVED,
+            QualityResolved {
+                path: path.to_string(),
+                target,
+                crf,
+                vmaf,
             },
         );
     }

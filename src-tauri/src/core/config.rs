@@ -42,9 +42,8 @@ pub const HOLDING_DIRNAME: &str = ".sqz_originals";
 
 /// Container extensions treated as input.
 pub const VIDEO_EXTENSIONS: &[&str] = &[
-    "mp4", "mkv", "avi", "mov", "wmv", "flv", "m4v", "mpg", "mpeg", "ts", "m2ts",
-    "mts", "webm", "vob", "3gp", "3g2", "divx", "ogv", "rm", "rmvb", "asf", "f4v",
-    "m2v", "mxf",
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "m4v", "mpg", "mpeg", "ts", "m2ts", "mts", "webm",
+    "vob", "3gp", "3g2", "divx", "ogv", "rm", "rmvb", "asf", "f4v", "m2v", "mxf",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,6 +298,12 @@ pub struct Config {
     /// Optional minimum SSIM (0..1) the output must reach vs the source, else the
     /// original is kept. `None` disables the perceptual-quality gate.
     pub ssim_floor: Option<f64>,
+    /// Optional VMAF target (0..100). `Some` enables VMAF quality mode: instead of
+    /// a fixed CRF, sqz searches per title for the smallest file that still hits
+    /// this perceptual-quality target. `None` (default) keeps preset/override
+    /// behavior. When set, it also auto-relaxes the post-encode `ssim_floor`
+    /// (redundant — VMAF already governs quality).
+    pub vmaf_target: Option<f64>,
     /// Skip Dolby Vision sources rather than risk dropping the DV layer.
     pub skip_dolby_vision: bool,
     /// Processing order for pending files.
@@ -350,6 +355,7 @@ impl Default for Config {
             audio_bitrate_kbps: DEFAULT_AUDIO_KBPS,
             verify_depth: VerifyDepth::Fast,
             ssim_floor: None,
+            vmaf_target: None,
             skip_dolby_vision: true,
             order: Order::Smart,
             paranoid: false,
@@ -375,6 +381,22 @@ impl Config {
     pub fn resolved_quality(&self) -> i32 {
         self.quality_override
             .unwrap_or_else(|| self.codec.base_quality() + self.quality.quality_offset())
+    }
+
+    /// True when VMAF quality mode is enabled for this run.
+    pub fn is_vmaf_mode(&self) -> bool {
+        self.vmaf_target.is_some()
+    }
+
+    /// The SSIM floor actually applied at verify time. VMAF mode auto-relaxes it:
+    /// the perceptual target already governs quality, so re-checking SSIM is
+    /// redundant work. Preset mode returns the configured floor unchanged.
+    pub fn effective_ssim_floor(&self) -> Option<f64> {
+        if self.is_vmaf_mode() {
+            None
+        } else {
+            self.ssim_floor
+        }
     }
 
     /// Effective verification depth: the legacy `paranoid` flag forces at least
@@ -419,6 +441,11 @@ impl Config {
         if let Some(floor) = self.ssim_floor {
             if !(0.0..=1.0).contains(&floor) {
                 return Err("ssim_floor must be in [0, 1]".into());
+            }
+        }
+        if let Some(target) = self.vmaf_target {
+            if !(0.0..=100.0).contains(&target) {
+                return Err("vmaf_target must be in [0, 100]".into());
             }
         }
         if matches!(self.on_success, OnSuccess::Holding) && self.holding_dir.is_none() {
@@ -480,31 +507,57 @@ mod tests {
 
     #[test]
     fn paranoid_forces_at_least_thorough() {
-        let cfg = Config { paranoid: true, verify_depth: VerifyDepth::Fast, ..Config::default() };
+        let cfg = Config {
+            paranoid: true,
+            verify_depth: VerifyDepth::Fast,
+            ..Config::default()
+        };
         assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Thorough);
         // An explicit stronger depth is preserved.
-        let cfg = Config { paranoid: true, verify_depth: VerifyDepth::Checksummed, ..Config::default() };
+        let cfg = Config {
+            paranoid: true,
+            verify_depth: VerifyDepth::Checksummed,
+            ..Config::default()
+        };
         assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Checksummed);
         // Without paranoid, the chosen depth stands.
-        let cfg = Config { paranoid: false, verify_depth: VerifyDepth::Fast, ..Config::default() };
+        let cfg = Config {
+            paranoid: false,
+            verify_depth: VerifyDepth::Fast,
+            ..Config::default()
+        };
         assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Fast);
     }
 
     #[test]
     fn auto_workers_resolves_to_a_sane_positive_count() {
-        let cfg = Config { workers: 0, ..Config::default() };
+        let cfg = Config {
+            workers: 0,
+            ..Config::default()
+        };
         let n = cfg.resolved_workers();
         assert!((1..=8).contains(&n));
         // Explicit worker counts pass through untouched.
-        let cfg = Config { workers: 5, ..Config::default() };
+        let cfg = Config {
+            workers: 5,
+            ..Config::default()
+        };
         assert_eq!(cfg.resolved_workers(), 5);
     }
 
     #[test]
     fn opus_falls_back_to_aac_in_mp4() {
-        let cfg = Config { container: Container::Mp4, audio_mode: AudioMode::Opus, ..Config::default() };
+        let cfg = Config {
+            container: Container::Mp4,
+            audio_mode: AudioMode::Opus,
+            ..Config::default()
+        };
         assert_eq!(cfg.effective_audio_mode(), AudioMode::Aac);
-        let cfg = Config { container: Container::Mkv, audio_mode: AudioMode::Opus, ..Config::default() };
+        let cfg = Config {
+            container: Container::Mkv,
+            audio_mode: AudioMode::Opus,
+            ..Config::default()
+        };
         assert_eq!(cfg.effective_audio_mode(), AudioMode::Opus);
     }
 
@@ -518,9 +571,49 @@ mod tests {
 
     #[test]
     fn validate_rejects_ssim_floor_out_of_range() {
-        let cfg = Config { ssim_floor: Some(1.5), ..Config::default() };
+        let cfg = Config {
+            ssim_floor: Some(1.5),
+            ..Config::default()
+        };
         assert!(cfg.validate().is_err());
-        let cfg = Config { ssim_floor: Some(0.95), ..Config::default() };
+        let cfg = Config {
+            ssim_floor: Some(0.95),
+            ..Config::default()
+        };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_vmaf_target_out_of_range() {
+        let cfg = Config {
+            vmaf_target: Some(120.0),
+            ..Config::default()
+        };
+        assert!(cfg.validate().is_err());
+        let cfg = Config {
+            vmaf_target: Some(95.0),
+            ..Config::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn vmaf_mode_auto_relaxes_ssim_floor() {
+        // Preset mode: the configured floor stands.
+        let cfg = Config {
+            ssim_floor: Some(0.98),
+            vmaf_target: None,
+            ..Config::default()
+        };
+        assert_eq!(cfg.effective_ssim_floor(), Some(0.98));
+        assert!(!cfg.is_vmaf_mode());
+        // VMAF mode: the floor is dropped (VMAF already gates quality).
+        let cfg = Config {
+            ssim_floor: Some(0.98),
+            vmaf_target: Some(95.0),
+            ..Config::default()
+        };
+        assert_eq!(cfg.effective_ssim_floor(), None);
+        assert!(cfg.is_vmaf_mode());
     }
 }

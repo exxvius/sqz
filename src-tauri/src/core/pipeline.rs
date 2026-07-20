@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::abort::{AbortConfig, AbortJudge, AbortProjection};
 use super::config::Config;
-use super::encode::{build_args, build_remux_args, run_encode, ProgressSample};
+use super::encode::{build_args_q, build_remux_args, run_encode, ProgressSample};
 use super::encoders::Encoder;
 use super::estimate::{predict_skip, SkipKind};
 use super::ffbin::FfBin;
@@ -143,6 +143,45 @@ fn try_remux(
     r.orig_size = Some(size);
     r.out_size = Some(out_size);
     Some(r)
+}
+
+/// Resolve the CRF-like quality for one file. Preset mode returns the run's fixed
+/// value. VMAF mode returns a cached per-title CRF when the file is unchanged,
+/// else runs the sample-encode search, caches the result, and reports it. A
+/// failed/cancelled search falls back to the preset quality — never a hard error.
+#[allow(clippy::too_many_arguments)]
+fn resolve_quality(
+    ff: &FfBin,
+    cfg: &Config,
+    encoder: &Encoder,
+    manifest: &Manifest,
+    info: &MediaInfo,
+    size: u64,
+    temp_dir: &Path,
+    path_str: &str,
+    cancel: &(dyn Fn() -> bool + Sync),
+    reporter: &dyn Reporter,
+) -> i32 {
+    let Some(target) = cfg.vmaf_target else {
+        return cfg.resolved_quality();
+    };
+    let mtime = std::fs::metadata(Path::new(path_str))
+        .map(|m| mtime_secs(&m))
+        .unwrap_or(0.0);
+
+    if let Some(crf) = manifest.cached_vmaf_crf(path_str, size, mtime, target) {
+        reporter.on_quality_resolved(path_str, target, crf, None);
+        return crf;
+    }
+    let on_search = |done: u32, total: u32| reporter.on_search_progress(path_str, done, total);
+    match super::vmaf::resolve_crf(ff, cfg, encoder, info, target, temp_dir, cancel, &on_search) {
+        Some(r) => {
+            let _ = manifest.set_vmaf_crf(path_str, r.crf, target);
+            reporter.on_quality_resolved(path_str, target, r.crf, Some(r.vmaf));
+            r.crf
+        }
+        None => cfg.resolved_quality(),
+    }
 }
 
 /// Process one file end to end. Returns the run-local [`ProcessResult`]; the
@@ -306,18 +345,27 @@ pub fn process_file(
         uuid::Uuid::new_v4().simple(),
         cfg.container.ext()
     ));
-    let args = build_args(cfg, &info, encoder, &ff.caps, &out);
-
-    // Staged early-abort judge, driven by ffmpeg progress ticks.
-    let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));
-    let abort_pred =
-        |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
 
     let name = src
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // Open the file's Live card first, so a VMAF search (which runs before the
+    // real encode) is visible on it rather than looking like a stall.
     reporter.on_file_start(path_str, &name, info.duration, size);
+
+    // Resolve the target quality for this file. Preset mode returns the fixed
+    // value instantly; VMAF mode searches (or reuses a cached CRF) for the
+    // smallest file that still hits the perceptual target, then reports the choice.
+    let quality = resolve_quality(
+        ff, cfg, encoder, manifest, &info, size, &temp_dir, path_str, &cancelled, reporter,
+    );
+    let args = build_args_q(cfg, &info, encoder, &ff.caps, &out, quality);
+
+    // Staged early-abort judge, driven by ffmpeg progress ticks.
+    let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));
+    let abort_pred =
+        |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
 
     let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
     let encode_start = std::time::Instant::now();

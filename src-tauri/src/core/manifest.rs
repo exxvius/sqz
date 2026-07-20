@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS files (
     encode_ms         INTEGER,
     health            TEXT,
     health_detail     TEXT,
-    health_checked_at REAL
+    health_checked_at REAL,
+    vmaf_crf          INTEGER,
+    vmaf_target       REAL
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -133,6 +135,10 @@ impl Manifest {
         let _ = conn.execute("ALTER TABLE files ADD COLUMN health TEXT", []);
         let _ = conn.execute("ALTER TABLE files ADD COLUMN health_detail TEXT", []);
         let _ = conn.execute("ALTER TABLE files ADD COLUMN health_checked_at REAL", []);
+        // VMAF quality-mode cache: the per-title CRF a search resolved, and the
+        // target it was resolved for (a different target invalidates the cache).
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN vmaf_crf INTEGER", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN vmaf_target REAL", []);
         // The "warning" (playback-caveat) health verdict was dropped; those files
         // probed fine, so fold any legacy rows back into "healthy".
         let _ = conn.execute(
@@ -452,6 +458,42 @@ impl Manifest {
         Ok(())
     }
 
+    /// The cached VMAF-resolved CRF for a file, valid only when the file is
+    /// unchanged (size + mtime match) **and** was resolved for the same `target`.
+    /// A different target, or any change to the file, is a miss (`None`) so the
+    /// search re-runs. Same change-detection `upsert_scanned` uses.
+    pub fn cached_vmaf_crf(&self, path: &str, size: u64, mtime: f64, target: f64) -> Option<i32> {
+        let conn = self.conn.lock().unwrap();
+        let row: Option<(i64, f64, Option<i64>, Option<f64>)> = conn
+            .query_row(
+                "SELECT size, mtime, vmaf_crf, vmaf_target FROM files WHERE path=?1",
+                params![path],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .ok();
+        let (old_size, old_mtime, crf, tgt) = row?;
+        let unchanged = old_size == size as i64 && (old_mtime - mtime).abs() <= f64::EPSILON;
+        let same_target = tgt
+            .map(|t| (t - target).abs() <= f64::EPSILON)
+            .unwrap_or(false);
+        if unchanged && same_target {
+            crf.map(|c| c as i32)
+        } else {
+            None
+        }
+    }
+
+    /// Record the VMAF-resolved CRF for a file and the target it targeted, so a
+    /// re-run of an unchanged file reuses it instead of searching again.
+    pub fn set_vmaf_crf(&self, path: &str, crf: i32, target: f64) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET vmaf_crf=?1, vmaf_target=?2 WHERE path=?3",
+            params![crf as i64, target, path],
+        )?;
+        Ok(())
+    }
+
     /// Files that have been health-scanned (the Library is a health dashboard, not
     /// a mirror of the whole manifest), with health, newest first. Same
     /// status/search/paging filters as [`history`](Self::history).
@@ -689,6 +731,24 @@ mod tests {
     }
 
     #[test]
+    fn vmaf_crf_cache_round_trips_and_invalidates() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        // Nothing cached yet.
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 1.0, 95.0), None);
+        // Store, then a matching (path, size, mtime, target) reads it back.
+        m.set_vmaf_crf("/a.mkv", 32, 95.0).unwrap();
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 1.0, 95.0), Some(32));
+        // A different target invalidates.
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 1.0, 97.0), None);
+        // A changed file (size or mtime) invalidates.
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 101, 1.0, 95.0), None);
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 2.0, 95.0), None);
+        // Unknown path is a miss, not an error.
+        assert_eq!(m.cached_vmaf_crf("/nope.mkv", 100, 1.0, 95.0), None);
+    }
+
+    #[test]
     fn stats_aggregate_encode_time_and_ratio() {
         let m = mem_db();
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
@@ -815,8 +875,14 @@ mod tests {
         let m = mem_db();
         m.upsert_indexed("/a.mkv", 100, 1.0).unwrap();
         m.upsert_indexed("/b.mkv", 200, 1.0).unwrap(); // never scanned
-        m.record_health("/a.mkv", "corrupt", Some("decode error"), Some("h264"), Some(1080))
-            .unwrap();
+        m.record_health(
+            "/a.mkv",
+            "corrupt",
+            Some("decode error"),
+            Some("h264"),
+            Some(1080),
+        )
+        .unwrap();
 
         let rows = m.library(&HistoryQuery::default()).unwrap();
         // Only the scanned file is in the Library; /b.mkv (unscanned) is excluded.
@@ -841,7 +907,7 @@ mod tests {
         m.set_status("/done.mkv", STATUS_DONE, &StatusUpdate::default())
             .unwrap();
         m.upsert_indexed("/scanned.mkv", 1, 1.0).unwrap(); // library-only
-        // No status filter → still must not surface the indexed row in History.
+                                                           // No status filter → still must not surface the indexed row in History.
         let rows = m.history(&HistoryQuery::default()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].path, "/done.mkv");
@@ -851,7 +917,8 @@ mod tests {
     fn library_only_lists_scanned_files() {
         let m = mem_db();
         // A pending (queued) file with no health scan is NOT in the Library.
-        m.upsert_scanned("/queued.mkv", 1, 1.0, false, true).unwrap();
+        m.upsert_scanned("/queued.mkv", 1, 1.0, false, true)
+            .unwrap();
         // A scanned file is.
         m.upsert_indexed("/scanned.mkv", 1, 1.0).unwrap();
         m.record_health("/scanned.mkv", "healthy", None, Some("h264"), Some(1080))
@@ -875,8 +942,12 @@ mod tests {
         // A skipped file (original kept) that was also scanned → row survives,
         // health cleared, so it leaves the Library but stays in History.
         m.upsert_scanned("/kept.mkv", 1, 1.0, false, true).unwrap();
-        m.set_status("/kept.mkv", STATUS_SKIPPED_EFFICIENT, &StatusUpdate::default())
-            .unwrap();
+        m.set_status(
+            "/kept.mkv",
+            STATUS_SKIPPED_EFFICIENT,
+            &StatusUpdate::default(),
+        )
+        .unwrap();
         m.record_health("/kept.mkv", "corrupt", Some("note"), None, None)
             .unwrap();
 
@@ -888,7 +959,10 @@ mod tests {
         assert!(m.library(&HistoryQuery::default()).unwrap().is_empty());
         // …but the skipped file's row is still tracked (History keeps it).
         let counts = m.status_counts().unwrap();
-        assert_eq!(counts.get(STATUS_SKIPPED_EFFICIENT).copied().unwrap_or(0), 1);
+        assert_eq!(
+            counts.get(STATUS_SKIPPED_EFFICIENT).copied().unwrap_or(0),
+            1
+        );
         assert_eq!(counts.get(STATUS_INDEXED).copied().unwrap_or(0), 0);
     }
 
@@ -896,7 +970,8 @@ mod tests {
     fn run_promotes_a_scanned_indexed_file_to_pending() {
         let m = mem_db();
         m.upsert_indexed("/x.mkv", 100, 1.0).unwrap();
-        m.record_health("/x.mkv", "healthy", None, None, None).unwrap();
+        m.record_health("/x.mkv", "healthy", None, None, None)
+            .unwrap();
         // A run discovers the same path (same size/mtime, no force): it must be
         // queued, not left stuck as a library-only indexed row.
         m.upsert_scanned("/x.mkv", 100, 1.0, false, true).unwrap();
@@ -907,7 +982,8 @@ mod tests {
     fn clear_health_drops_a_file_from_the_library() {
         let m = mem_db();
         m.upsert_indexed("/x.mkv", 1, 1.0).unwrap();
-        m.record_health("/x.mkv", "healthy", None, None, None).unwrap();
+        m.record_health("/x.mkv", "healthy", None, None, None)
+            .unwrap();
         assert_eq!(m.library(&HistoryQuery::default()).unwrap().len(), 1);
         m.clear_health("/x.mkv").unwrap();
         assert!(m.library(&HistoryQuery::default()).unwrap().is_empty());

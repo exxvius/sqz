@@ -22,6 +22,7 @@ export const defaultConfig = (): RunConfig => ({
   audio_bitrate_kbps: 128,
   verify_depth: "fast",
   ssim_floor: null,
+  vmaf_target: null,
   skip_dolby_vision: true,
   order: "smart",
   paranoid: false,
