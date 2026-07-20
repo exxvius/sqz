@@ -48,31 +48,31 @@ after the new copy has earned it:
 <div align="center">
 
 ### Codec and quality presets
-<img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="70%">
+<img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="90%">
 <br><br><br>
 
 ### Uses your GPU
-<img src="docs/images/feature-encoders.png" alt="Detected hardware encoders per codec" width="70%">
+<img src="docs/images/feature-encoders.png" alt="Detected hardware encoders per codec" width="90%">
 <br><br><br>
 
 ### See your savings before you run
-<img src="docs/images/feature-projection.png" alt="Reclaimable space broken down by codec and resolution" width="70%">
+<img src="docs/images/feature-projection.png" alt="Reclaimable space broken down by codec and resolution" width="90%">
 <br><br><br>
 
 ### Originals go where you tell them
-<img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="70%">
+<img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="90%">
 <br><br><br>
 
 ### Watch every encode live
-<img src="docs/images/feature-live.png" alt="Several files encoding in parallel, each with live stats" width="70%">
+<img src="docs/images/feature-live.png" alt="Several files encoding in parallel, each with live stats" width="90%">
 <br><br><br>
 
 ### Lock it and walk away
-<img src="docs/images/feature-locked.png" alt="Locked mode with masked names and the unlock prompt" width="70%">
+<img src="docs/images/feature-locked.png" alt="Locked mode with masked names and the unlock prompt" width="90%">
 <br><br><br>
 
 ### Searchable history of every file
-<img src="docs/images/feature-history.png" alt="History with reclaimed totals and per-run stats" width="70%">
+<img src="docs/images/feature-history.png" alt="History with reclaimed totals and per-run stats" width="90%">
 <br><br><br>
 
 ### Seventeen accent colors with light and dark themes
