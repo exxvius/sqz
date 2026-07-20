@@ -43,56 +43,35 @@ after the new copy has earned it:
 5. **Swap** with a same-volume rename, then send the original to the Recycle Bin, a holding folder, or delete it, whichever you picked.
 6. **Record** the outcome in a SQLite manifest. That is what makes a run resumable, and what the History tab reads from.
 
-## Features
+# Features
 
-<table>
-  <tr>
-    <td width="50%" align="center" valign="top">
-      <strong>See your savings before you run</strong><br><br>
-      <img src="docs/images/feature-projection.png" alt="Reclaimable space broken down by codec and resolution" width="100%">
-    </td>
-    <td width="50%" align="center" valign="top">
-      <strong>Watch every encode live</strong><br><br>
-      <img src="docs/images/feature-live.png" alt="Several files encoding in parallel, each with live stats" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center" valign="top">
-      <strong>Codec and quality presets</strong><br><br>
-      <img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="100%">
-    </td>
-    <td width="50%" align="center" valign="top">
-      <strong>Uses your GPU</strong><br><br>
-      <img src="docs/images/feature-encoders.png" alt="Detected hardware encoders per codec" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center" valign="top">
-      <strong>Searchable history of every file</strong><br><br>
-      <img src="docs/images/feature-history.png" alt="History with reclaimed totals and per-run stats" width="100%">
-    </td>
-    <td width="50%" align="center" valign="top">
-      <strong>Lock it and walk away</strong><br><br>
-      <img src="docs/images/feature-locked.png" alt="Locked mode with masked names and the unlock prompt" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center" valign="top">
-      <strong>Originals go where you tell them</strong><br><br>
-      <img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="50%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center" valign="top">
-      <strong>Seventeen accent colors</strong><br><br>
-      <img src="docs/images/feature-accents.png" alt="The Live page sliced into ten accents" width="100%">
-    </td>
-    <td width="50%" align="center" valign="top">
-      <strong>Light and dark themes</strong><br><br>
-      <img src="docs/images/feature-theme.png" alt="The Home screen split into dark and light" width="100%">
-    </td>
-  </tr>
-</table>
+<center>
+<img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="70%">
+<h2>Codec and quality presets<br><br></h2>
+
+<img src="docs/images/feature-encoders.png" alt="Detected hardware encoders per codec" width="70%">
+<h2>Uses your GPU<br><br></h2>
+
+<img src="docs/images/feature-projection.png" alt="Reclaimable space broken down by codec and resolution" width="70%">
+<h2>See your savings before you run<br><br></h2>
+
+<img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="70%">
+<h2>Originals go where you tell them<br><br></h2>
+
+<img src="docs/images/feature-live.png" alt="Several files encoding in parallel, each with live stats" width="70%">
+<h2>Watch every encode live<br><br></h2>
+
+<img src="docs/images/feature-locked.png" alt="Locked mode with masked names and the unlock prompt" width="70%">
+<h2>Lock it and walk away<br><br></h2>
+
+<img src="docs/images/feature-history.png" alt="History with reclaimed totals and per-run stats" width="70%">
+<h2>Searchable history of every file<br><br></h2>
+
+<img src="docs/images/feature-accents.png" alt="The Live page sliced into ten accents" width="49%">
+<img src="docs/images/feature-theme.png" alt="The Home screen split into dark and light" width="49%">
+<h2><br>Seventeen accent colors with light and dark themes<br><br></h2>
+</center>
+<br>
 
 ## Building from source
 

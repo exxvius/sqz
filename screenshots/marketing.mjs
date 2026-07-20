@@ -17,7 +17,7 @@
 // Usage: node screenshots/marketing.mjs   (dev server must be running on :1420)
 
 import { chromium } from "playwright";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const BASE = "http://localhost:1420/screenshots/harness.html";
 const OUT = "docs/images";
@@ -147,41 +147,6 @@ async function stage({ w, h, inner, css = "", opaque = false }) {
 async function save(file, buf) {
   await writeFile(`${OUT}/${file}`, buf);
   console.log(`✓ ${file}`);
-}
-
-// Drop each composed component panel into a uniform card (same size, same subtle
-// backdrop, same padding) so the README's feature grid is even instead of ragged.
-// GitHub strips CSS from README HTML, so the frame has to be baked into the image;
-// object-fit:contain centres each panel at whatever scale fits. The full-screen
-// panels (accents, theme) are already screenshots and stay as they are.
-async function frameAll(names) {
-  const W = 1540;
-  const H = 770;
-  const PAD = 48;
-  const MARGIN = 16; // transparent gutter baked in, so cards don't touch in the grid
-  for (const n of names) {
-    const b64 = (await readFile(`${OUT}/feature-${n}.png`)).toString("base64");
-    const page = await ctx.newPage();
-    await page.setViewportSize({ width: W + 2 * MARGIN, height: H + 2 * MARGIN });
-    await page.setContent(
-      `<!doctype html><meta charset="utf8"><style>*{margin:0;box-sizing:border-box}
-       .wrap{width:${W + 2 * MARGIN}px;height:${H + 2 * MARGIN}px;padding:${MARGIN}px;background:transparent}
-       .card{width:${W}px;height:${H}px;padding:${PAD}px;display:flex;align-items:center;justify-content:center;
-         border-radius:20px;border:1px solid rgba(255,255,255,.07);
-         background:radial-gradient(90% 130% at 10% -25%, rgba(18,182,138,.12), transparent 55%), linear-gradient(158deg,#0f1c16 0%,#0a1310 100%)}
-       .card img{max-width:100%;max-height:100%;object-fit:contain;display:block}</style>
-       <div class="wrap"><div class="card"><img src="data:image/png;base64,${b64}"></div></div>`,
-    );
-    await page.evaluate(async () => {
-      await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
-    });
-    await page.waitForTimeout(150);
-    // omitBackground keeps the rounded-corner cut-outs and the gutter transparent.
-    const buf = await page.locator(".wrap").screenshot({ omitBackground: true });
-    await page.close();
-    await writeFile(`${OUT}/feature-${n}.png`, buf);
-    console.log(`✓ framed feature-${n}.png`);
-  }
 }
 
 /** Vertically stack centred pieces (for the simpler single-column features). */
@@ -450,10 +415,6 @@ await projection();
 await encoders();
 await presets();
 await disposal();
-
-// Wrap the component panels in uniform cards so the README grid is even. The
-// full-screen accents/theme panels are left as-is.
-await frameAll(["projection", "live", "presets", "encoders", "history", "locked", "disposal"]);
 
 await browser.close();
 console.log("done");
