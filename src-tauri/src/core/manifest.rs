@@ -17,21 +17,28 @@ pub const STATUS_SKIPPED_EFFICIENT: &str = "skipped_already_efficient";
 pub const STATUS_SKIPPED_NO_GAIN: &str = "skipped_no_gain";
 pub const STATUS_SKIPPED_MARGINAL: &str = "skipped_marginal";
 pub const STATUS_FAILED: &str = "failed";
+/// Known to the library (discovered by a health scan) but not queued for
+/// encoding. A real run's `upsert_scanned` promotes it to `pending`; the claim
+/// query never picks it up, so scanning a library never encodes anything.
+pub const STATUS_INDEXED: &str = "indexed";
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS files (
-    path        TEXT PRIMARY KEY,
-    size        INTEGER,
-    mtime       REAL,
-    status      TEXT NOT NULL,
-    src_codec   TEXT,
-    height      INTEGER,
-    out_size    INTEGER,
-    saved_bytes INTEGER,
-    error       TEXT,
-    updated_at  REAL,
-    forced      INTEGER DEFAULT 0,
-    encode_ms   INTEGER
+    path              TEXT PRIMARY KEY,
+    size              INTEGER,
+    mtime             REAL,
+    status            TEXT NOT NULL,
+    src_codec         TEXT,
+    height            INTEGER,
+    out_size          INTEGER,
+    saved_bytes       INTEGER,
+    error             TEXT,
+    updated_at        REAL,
+    forced            INTEGER DEFAULT 0,
+    encode_ms         INTEGER,
+    health            TEXT,
+    health_detail     TEXT,
+    health_checked_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -64,6 +71,22 @@ pub struct HistoryRow {
     pub out_size: Option<u64>,
     pub saved_bytes: Option<i64>,
     pub error: Option<String>,
+    pub updated_at: Option<f64>,
+}
+
+/// A library entry: a known file with its encode status *and* health state. The
+/// library view shows every discovered file, whether or not it's been re-encoded.
+#[derive(Debug, Clone, Serialize)]
+pub struct LibraryRow {
+    pub path: String,
+    pub status: String,
+    pub size: Option<u64>,
+    pub src_codec: Option<String>,
+    pub height: Option<u32>,
+    /// One of the `health::HealthState` slugs, or `None` if never scanned.
+    pub health: Option<String>,
+    pub health_detail: Option<String>,
+    pub health_checked_at: Option<f64>,
     pub updated_at: Option<f64>,
 }
 
@@ -107,6 +130,15 @@ impl Manifest {
         // Migrations for manifests created before newer columns existed.
         let _ = conn.execute("ALTER TABLE files ADD COLUMN forced INTEGER DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE files ADD COLUMN encode_ms INTEGER", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN health TEXT", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN health_detail TEXT", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN health_checked_at REAL", []);
+        // The "warning" (playback-caveat) health verdict was dropped; those files
+        // probed fine, so fold any legacy rows back into "healthy".
+        let _ = conn.execute(
+            "UPDATE files SET health='healthy', health_detail=NULL WHERE health='warning'",
+            [],
+        );
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -142,7 +174,11 @@ impl Manifest {
             Some((old_size, old_mtime, status)) => {
                 let changed = old_size != size as i64 || (old_mtime - mtime).abs() > f64::EPSILON;
                 let failed_retry = retry_failed && status == STATUS_FAILED;
-                if force || changed || failed_retry {
+                // An `indexed` row is a library-only entry (health-scanned, never
+                // queued). When a run discovers it, promote it to `pending` so a
+                // scanned folder actually encodes — otherwise it stays stuck.
+                let was_indexed = status == STATUS_INDEXED;
+                if force || changed || failed_retry || was_indexed {
                     conn.execute(
                         "UPDATE files SET size=?1, mtime=?2, status=?3, error=NULL, \
                          out_size=NULL, saved_bytes=NULL, updated_at=?4 WHERE path=?5",
@@ -327,7 +363,14 @@ impl Manifest {
                 params![STATUS_DONE],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )?;
-        let files_touched: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+        // Exclude library-only (indexed) rows: History is the pipeline's ledger,
+        // so "files tracked" means files processed or queued — not everything a
+        // directory health-scan merely discovered (those live in the Library).
+        let files_touched: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status != ?1",
+            params![STATUS_INDEXED],
+            |r| r.get(0),
+        )?;
         Ok(Stats {
             total_reclaimed,
             encode_seconds: encode_ms as f64 / 1000.0,
@@ -347,7 +390,81 @@ impl Manifest {
             "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, updated_at \
              FROM files",
         );
-        let mut conds: Vec<String> = Vec::new();
+        // History is the pipeline ledger — library-only (indexed) rows that were
+        // merely health-scanned, never processed, don't belong here.
+        let mut conds: Vec<String> = vec![format!("status != '{STATUS_INDEXED}'")];
+        let mut args: Vec<Value> = Vec::new();
+
+        if !q.statuses.is_empty() {
+            let ph = vec!["?"; q.statuses.len()].join(",");
+            conds.push(format!("status IN ({ph})"));
+            args.extend(q.statuses.iter().map(|s| Value::Text(s.clone())));
+        }
+        if let Some(search) = &q.search {
+            if !search.is_empty() {
+                conds.push("LOWER(path) LIKE ?".into());
+                args.push(Value::Text(format!("%{}%", search.to_lowercase())));
+            }
+        }
+        sql.push_str(" WHERE ");
+        sql.push_str(&conds.join(" AND "));
+        sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
+        args.push(Value::Integer(if q.limit > 0 { q.limit } else { 500 }));
+        args.push(Value::Integer(q.offset.max(0)));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), row_to_history)?;
+        rows.collect()
+    }
+
+    /// Register a file discovered by a health/library scan. Inserts it as
+    /// `indexed` only when absent — an existing row (pending, done, failed, …) is
+    /// left completely untouched, so scanning the library never disturbs the
+    /// encode queue or reprocesses anything.
+    pub fn upsert_indexed(&self, path: &str, size: u64, mtime: f64) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO files(path, size, mtime, status, updated_at) VALUES(?1,?2,?3,?4,?5) \
+             ON CONFLICT(path) DO NOTHING",
+            params![path, size as i64, mtime, STATUS_INDEXED, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Record a health verdict for a file (from a scan), plus any codec/height the
+    /// probe revealed. Never touches `status`: health is an orthogonal axis, so a
+    /// scan can annotate a `done` or `pending` row without re-queuing it. Codec and
+    /// height are COALESCE-guarded so a `None` probe never wipes known metadata.
+    pub fn record_health(
+        &self,
+        path: &str,
+        health: &str,
+        detail: Option<&str>,
+        src_codec: Option<&str>,
+        height: Option<u32>,
+    ) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET health=?1, health_detail=?2, health_checked_at=?3, \
+             src_codec=COALESCE(?4, src_codec), height=COALESCE(?5, height) WHERE path=?6",
+            params![health, detail, now(), src_codec, height, path],
+        )?;
+        Ok(())
+    }
+
+    /// Files that have been health-scanned (the Library is a health dashboard, not
+    /// a mirror of the whole manifest), with health, newest first. Same
+    /// status/search/paging filters as [`history`](Self::history).
+    pub fn library(&self, q: &HistoryQuery) -> rusqlite::Result<Vec<LibraryRow>> {
+        use rusqlite::types::Value;
+        let conn = self.conn.lock().unwrap();
+
+        let mut sql = String::from(
+            "SELECT path, status, size, src_codec, height, health, health_detail, \
+             health_checked_at, updated_at FROM files",
+        );
+        // Only scanned files belong to the Library — never the raw encode queue.
+        let mut conds: Vec<String> = vec!["health IS NOT NULL".to_string()];
         let mut args: Vec<Value> = Vec::new();
 
         if !q.statuses.is_empty() {
@@ -366,12 +483,65 @@ impl Manifest {
             sql.push_str(&conds.join(" AND "));
         }
         sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
-        args.push(Value::Integer(if q.limit > 0 { q.limit } else { 500 }));
+        args.push(Value::Integer(if q.limit > 0 { q.limit } else { 2000 }));
         args.push(Value::Integer(q.offset.max(0)));
 
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args), row_to_history)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), row_to_library)?;
         rows.collect()
+    }
+
+    /// Counts of scanned files by health state. Drives the library view's health
+    /// summary; never-scanned files aren't part of the Library, so they're excluded.
+    pub fn health_counts(&self) -> rusqlite::Result<HashMap<String, i64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT health, COUNT(*) FROM files WHERE health IS NOT NULL GROUP BY health",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (k, v) = row?;
+            map.insert(k, v);
+        }
+        Ok(map)
+    }
+
+    /// Remove files from the Library health list by path. A row that carries
+    /// pipeline history (done, skipped, failed, pending, …) keeps its row but has
+    /// its health annotation cleared — so it drops out of the Library while its
+    /// encode history stays intact for the History view and predictions. A
+    /// scan-only (`indexed`) row has no history worth keeping, so it's deleted
+    /// outright. Returns how many rows were affected.
+    pub fn remove_from_library(&self, paths: &[String]) -> rusqlite::Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        {
+            let mut del = tx.prepare("DELETE FROM files WHERE path=?1 AND status=?2")?;
+            let mut clr = tx.prepare(
+                "UPDATE files SET health=NULL, health_detail=NULL, health_checked_at=NULL \
+                 WHERE path=?1 AND status!=?2 AND health IS NOT NULL",
+            )?;
+            for p in paths {
+                n += del.execute(params![p, STATUS_INDEXED])?;
+                n += clr.execute(params![p, STATUS_INDEXED])?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Clear a file's health annotation, dropping it from the Library. Called when
+    /// a file is re-encoded (its original is replaced/moved), so the stale scan
+    /// result of the now-gone file doesn't linger as a dead Library entry.
+    pub fn clear_health(&self, path: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET health=NULL, health_detail=NULL, health_checked_at=NULL WHERE path=?1",
+            params![path],
+        )?;
+        Ok(())
     }
 
     /// Delete one row from the manifest.
@@ -386,7 +556,8 @@ impl Manifest {
         use rusqlite::types::Value;
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from("DELETE FROM files");
-        let mut conds: Vec<String> = Vec::new();
+        // Never remove library-only (indexed) rows via a History action.
+        let mut conds: Vec<String> = vec![format!("status != '{STATUS_INDEXED}'")];
         let mut args: Vec<Value> = Vec::new();
         if !q.statuses.is_empty() {
             let ph = vec!["?"; q.statuses.len()].join(",");
@@ -399,10 +570,8 @@ impl Manifest {
                 args.push(Value::Text(format!("%{}%", search.to_lowercase())));
             }
         }
-        if !conds.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&conds.join(" AND "));
-        }
+        sql.push_str(" WHERE ");
+        sql.push_str(&conds.join(" AND "));
         conn.execute(&sql, rusqlite::params_from_iter(args))
     }
 
@@ -450,6 +619,22 @@ fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
         out_size: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         saved_bytes: r.get(6)?,
         error: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
+}
+
+fn row_to_library(r: &rusqlite::Row) -> rusqlite::Result<LibraryRow> {
+    Ok(LibraryRow {
+        path: r.get(0)?,
+        status: r.get(1)?,
+        size: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+        src_codec: r.get(3)?,
+        height: r
+            .get::<_, Option<i64>>(4)?
+            .and_then(|v| u32::try_from(v).ok()),
+        health: r.get(5)?,
+        health_detail: r.get(6)?,
+        health_checked_at: r.get(7)?,
         updated_at: r.get(8)?,
     })
 }
@@ -597,6 +782,145 @@ mod tests {
         assert_eq!(codec, "h264");
         assert_eq!(*height, 1080);
         assert_eq!((*saved, *size, *n), (500, 1000, 1));
+    }
+
+    #[test]
+    fn indexed_file_is_not_claimable_and_stays_out_of_the_encode_queue() {
+        let m = mem_db();
+        m.upsert_indexed("/lib/a.mkv", 100, 1.0).unwrap();
+        // Indexed is not pending, so a run never claims it.
+        assert!(m.pending_paths().unwrap().is_empty());
+        assert!(m
+            .claim_next_pending(super::super::config::Order::Smart)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn upsert_indexed_never_disturbs_an_existing_row() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
+            .unwrap();
+        // A later library scan of the same path must not resurrect it as pending.
+        m.upsert_indexed("/a.mkv", 100, 1.0).unwrap();
+        assert!(m.pending_paths().unwrap().is_empty());
+        let counts = m.status_counts().unwrap();
+        assert_eq!(counts.get(STATUS_DONE).copied().unwrap_or(0), 1);
+        assert_eq!(counts.get(STATUS_INDEXED).copied().unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn record_health_round_trips_and_only_scanned_files_are_counted() {
+        let m = mem_db();
+        m.upsert_indexed("/a.mkv", 100, 1.0).unwrap();
+        m.upsert_indexed("/b.mkv", 200, 1.0).unwrap(); // never scanned
+        m.record_health("/a.mkv", "corrupt", Some("decode error"), Some("h264"), Some(1080))
+            .unwrap();
+
+        let rows = m.library(&HistoryQuery::default()).unwrap();
+        // Only the scanned file is in the Library; /b.mkv (unscanned) is excluded.
+        assert_eq!(rows.len(), 1);
+        let a = &rows[0];
+        assert_eq!(a.path, "/a.mkv");
+        assert_eq!(a.health.as_deref(), Some("corrupt"));
+        assert_eq!(a.health_detail.as_deref(), Some("decode error"));
+        assert_eq!(a.src_codec.as_deref(), Some("h264"));
+        assert_eq!(a.height, Some(1080));
+        assert!(a.health_checked_at.is_some());
+
+        let counts = m.health_counts().unwrap();
+        assert_eq!(counts.get("corrupt").copied().unwrap_or(0), 1);
+        assert!(counts.get("unscanned").is_none());
+    }
+
+    #[test]
+    fn history_excludes_library_only_indexed_rows() {
+        let m = mem_db();
+        m.upsert_scanned("/done.mkv", 1, 1.0, false, true).unwrap();
+        m.set_status("/done.mkv", STATUS_DONE, &StatusUpdate::default())
+            .unwrap();
+        m.upsert_indexed("/scanned.mkv", 1, 1.0).unwrap(); // library-only
+        // No status filter → still must not surface the indexed row in History.
+        let rows = m.history(&HistoryQuery::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/done.mkv");
+    }
+
+    #[test]
+    fn library_only_lists_scanned_files() {
+        let m = mem_db();
+        // A pending (queued) file with no health scan is NOT in the Library.
+        m.upsert_scanned("/queued.mkv", 1, 1.0, false, true).unwrap();
+        // A scanned file is.
+        m.upsert_indexed("/scanned.mkv", 1, 1.0).unwrap();
+        m.record_health("/scanned.mkv", "healthy", None, Some("h264"), Some(1080))
+            .unwrap();
+
+        let rows = m.library(&HistoryQuery::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, "/scanned.mkv");
+        let counts = m.health_counts().unwrap();
+        assert_eq!(counts.get("healthy").copied().unwrap_or(0), 1);
+        assert!(counts.get("unscanned").is_none());
+    }
+
+    #[test]
+    fn remove_from_library_clears_health_but_keeps_pipeline_rows() {
+        let m = mem_db();
+        // Scan-only row → deleted outright.
+        m.upsert_indexed("/scan-only.mkv", 1, 1.0).unwrap();
+        m.record_health("/scan-only.mkv", "healthy", None, None, None)
+            .unwrap();
+        // A skipped file (original kept) that was also scanned → row survives,
+        // health cleared, so it leaves the Library but stays in History.
+        m.upsert_scanned("/kept.mkv", 1, 1.0, false, true).unwrap();
+        m.set_status("/kept.mkv", STATUS_SKIPPED_EFFICIENT, &StatusUpdate::default())
+            .unwrap();
+        m.record_health("/kept.mkv", "corrupt", Some("note"), None, None)
+            .unwrap();
+
+        let n = m
+            .remove_from_library(&["/scan-only.mkv".to_string(), "/kept.mkv".to_string()])
+            .unwrap();
+        assert_eq!(n, 2);
+        // Neither is in the Library any more…
+        assert!(m.library(&HistoryQuery::default()).unwrap().is_empty());
+        // …but the skipped file's row is still tracked (History keeps it).
+        let counts = m.status_counts().unwrap();
+        assert_eq!(counts.get(STATUS_SKIPPED_EFFICIENT).copied().unwrap_or(0), 1);
+        assert_eq!(counts.get(STATUS_INDEXED).copied().unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn run_promotes_a_scanned_indexed_file_to_pending() {
+        let m = mem_db();
+        m.upsert_indexed("/x.mkv", 100, 1.0).unwrap();
+        m.record_health("/x.mkv", "healthy", None, None, None).unwrap();
+        // A run discovers the same path (same size/mtime, no force): it must be
+        // queued, not left stuck as a library-only indexed row.
+        m.upsert_scanned("/x.mkv", 100, 1.0, false, true).unwrap();
+        assert_eq!(m.pending_paths().unwrap(), vec!["/x.mkv".to_string()]);
+    }
+
+    #[test]
+    fn clear_health_drops_a_file_from_the_library() {
+        let m = mem_db();
+        m.upsert_indexed("/x.mkv", 1, 1.0).unwrap();
+        m.record_health("/x.mkv", "healthy", None, None, None).unwrap();
+        assert_eq!(m.library(&HistoryQuery::default()).unwrap().len(), 1);
+        m.clear_health("/x.mkv").unwrap();
+        assert!(m.library(&HistoryQuery::default()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn record_health_does_not_change_encode_status() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        m.record_health("/a.mkv", "corrupt", Some("decode error"), None, None)
+            .unwrap();
+        // Still pending for encoding; health is a separate axis.
+        assert_eq!(m.pending_paths().unwrap(), vec!["/a.mkv".to_string()]);
     }
 
     #[test]

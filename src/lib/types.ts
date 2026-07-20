@@ -12,6 +12,7 @@ export type Container = "mkv" | "mp4";
 export type AudioMode = "copy" | "opus" | "aac";
 export type VerifyDepth = "fast" | "thorough" | "checksummed";
 export type ScaleFilter = "lanczos" | "bicubic" | "bilinear" | "area";
+export type BitDepth = "source" | "8" | "10";
 export type Order =
   | "smart"
   | "largest-first"
@@ -90,6 +91,7 @@ export interface RunConfig {
   min_savings: number;
   max_height: number;
   scale_filter: ScaleFilter;
+  bit_depth: BitDepth;
   on_success: OnSuccess;
   holding_dir?: string | null;
   holding_retention_days: number;
@@ -128,6 +130,7 @@ export type Outcome =
 
 /** Manifest status strings (as stored in the DB). */
 export type Status =
+  | "indexed"
   | "pending"
   | "processing"
   | "done"
@@ -136,6 +139,47 @@ export type Status =
   | "skipped_marginal"
   | "skipped_no_gain"
   | "failed";
+
+/** Per-file library health verdict (from a health scan). */
+export type HealthState = "healthy" | "corrupt" | "unreadable";
+
+/** A library entry: a known file with its encode status and health state. */
+export interface LibraryRow {
+  path: string;
+  status: Status;
+  size: number | null;
+  src_codec: string | null;
+  height: number | null;
+  health: HealthState | null;
+  health_detail: string | null;
+  health_checked_at: number | null;
+  updated_at: number | null;
+}
+
+/** The library view payload: counts by health + the file rows. */
+export interface Library {
+  /** Counts keyed by health state, with never-scanned files under "unscanned". */
+  counts: Record<string, number>;
+  rows: LibraryRow[];
+}
+
+/** Tally returned when a health scan finishes. */
+export interface HealthSummary {
+  scanned: number;
+  healthy: number;
+  corrupt: number;
+  unreadable: number;
+  deep: boolean;
+  cancelled: boolean;
+}
+
+/** Per-file health-scan progress event. */
+export interface HealthProgress {
+  scanned: number;
+  total: number;
+  path: string;
+  health: HealthState;
+}
 
 export interface ProcessResult {
   path: string;

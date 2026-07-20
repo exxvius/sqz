@@ -135,6 +135,9 @@ fn try_remux(
             ..meta_of(info)
         },
     );
+    // The original was replaced, so any prior health scan of it is now stale —
+    // drop it from the Library (a rescan will pick up the new file).
+    let _ = manifest.clear_health(path_str);
     let mut r = ProcessResult::new(path_str, Outcome::Normalized);
     r.saved_bytes = saved;
     r.orig_size = Some(size);
@@ -464,6 +467,9 @@ pub fn process_file(
             ..meta_upd(&info)
         },
     );
+    // The original was replaced, so any prior health scan of it is now stale —
+    // drop it from the Library (a rescan will pick up the new file).
+    let _ = manifest.clear_health(path_str);
 
     let mut result = ProcessResult::new(path_str, Outcome::Done);
     result.saved_bytes = saved;

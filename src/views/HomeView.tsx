@@ -14,6 +14,7 @@ import { useStore } from "../lib/store";
 import { useLock } from "../lib/lock";
 import type {
   AudioMode,
+  BitDepth,
   Container,
   FfStatus,
   OnSuccess,
@@ -42,6 +43,12 @@ const DISPOSAL: { id: OnSuccess; label: string }[] = [
 const CONTAINERS: { id: Container; label: string }[] = [
   { id: "mkv", label: "MKV" },
   { id: "mp4", label: "MP4" },
+];
+
+const BIT_DEPTH_OPTIONS: { value: BitDepth; label: string }[] = [
+  { value: "source", label: "Match source" },
+  { value: "8", label: "8-bit" },
+  { value: "10", label: "10-bit (HDR-ready, less banding)" },
 ];
 
 const AUDIO_OPTIONS: { value: AudioMode; label: string }[] = [
@@ -278,6 +285,21 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="field">
+              <label>
+                Bit depth
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  10-bit improves compression and reduces banding, even from an 8-bit source.
+                  AV1 and HEVC support it; hardware H.264 falls back to 8-bit.
+                </div>
+              </label>
+              <Select
+                value={config.bit_depth}
+                options={BIT_DEPTH_OPTIONS}
+                ariaLabel="Output bit depth"
+                onChange={(v) => patch({ bit_depth: v as BitDepth })}
+              />
             </div>
             <div className="field">
               <label>

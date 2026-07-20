@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
 import { Select } from "./Select";
-import { api } from "../lib/api";
-import type { Codec, Detection, EncoderFamily } from "../lib/types";
+import { useProbes } from "../lib/probes";
+import type { Codec, EncoderFamily } from "../lib/types";
 
 interface Props {
   codec: Codec;
@@ -25,21 +24,9 @@ const CODEC_LABEL: Record<Codec, string> = {
 };
 
 export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Props) {
-  const [detection, setDetection] = useState<Detection | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-
-  const detect = () => {
-    setLoading(true);
-    setFailed(false);
-    api
-      .detectEncoders()
-      .then(setDetection)
-      .catch(() => setFailed(true))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(detect, []);
+  // Detection is probed once at app root and cached, so it survives tab switches
+  // instead of re-running a real test-encode every time Home is opened.
+  const { detection, detecting: loading, detectFailed: failed, redetect: detect } = useProbes();
 
   const support = detection?.codecs.find((c) => c.codec === codec);
   const usable = support?.usable ?? [];

@@ -11,8 +11,14 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "./api";
-import { subscribeEngine } from "./events";
-import type { FileProgress, ProcessResult, RunConfig, RunSummary } from "./types";
+import { subscribeEngine, subscribeHealth } from "./events";
+import type {
+  FileProgress,
+  HealthProgress,
+  ProcessResult,
+  RunConfig,
+  RunSummary,
+} from "./types";
 
 const PROJECTION_HISTORY = 24;
 
@@ -57,6 +63,11 @@ interface State {
     skipped: number;
     processed: number;
   };
+  /** Library health scan — lifted here so its progress survives tab switches. */
+  scanning: boolean;
+  scanDeep: boolean;
+  scanProgress: HealthProgress | null;
+  scanError: string | null;
 }
 
 type Action =
@@ -68,7 +79,11 @@ type Action =
   | { type: "FILE_END"; path: string }
   | { type: "RECORD"; result: ProcessResult }
   | { type: "RUN_DONE"; summary: RunSummary }
-  | { type: "CLEAR_LOG" };
+  | { type: "CLEAR_LOG" }
+  | { type: "SCAN_START"; deep: boolean }
+  | { type: "SCAN_PROGRESS"; p: HealthProgress }
+  | { type: "SCAN_END" }
+  | { type: "SCAN_FAIL"; error: string };
 
 const LOG_CAP = 1000;
 
@@ -90,6 +105,10 @@ const initial: State = {
   log: [],
   summary: null,
   session: emptySession(),
+  scanning: false,
+  scanDeep: false,
+  scanProgress: null,
+  scanError: null,
 };
 
 function nameOf(path: string): string {
@@ -199,6 +218,15 @@ function reducer(state: State, action: Action): State {
       // Visually clears the on-screen event log only — the manifest DB (History
       // tab) is untouched.
       return { ...state, log: [] };
+    case "SCAN_START":
+      return { ...state, scanning: true, scanDeep: action.deep, scanProgress: null, scanError: null };
+    case "SCAN_PROGRESS":
+      // A late progress tick from a finished/failed scan must not revive the bar.
+      return state.scanning ? { ...state, scanProgress: action.p } : state;
+    case "SCAN_END":
+      return { ...state, scanning: false, scanProgress: null };
+    case "SCAN_FAIL":
+      return { ...state, scanning: false, scanProgress: null, scanError: action.error };
     default:
       return state;
   }
@@ -213,6 +241,8 @@ interface StoreValue extends State {
   retryFile: (path: string) => Promise<void>;
   forceFile: (path: string) => Promise<void>;
   clearLog: () => void;
+  /** Start a library health scan; progress lands in `scanProgress`. */
+  startScan: (config: RunConfig, deep: boolean) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -227,6 +257,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // immediately so we never end up with two live listeners (duplicate events).
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    let unlistenHealth: (() => void) | undefined;
     subscribeEngine({
       onRunStart: (total) =>
         dispatch({ type: "RUN_START", minSavings: pendingMinSavings.current, total }),
@@ -247,11 +278,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       else unlisten = u;
     });
 
+    // Health-scan events feed the shared scan state, so the Library progress bar
+    // keeps updating even while another tab is showing.
+    subscribeHealth({
+      onProgress: (p) => dispatch({ type: "SCAN_PROGRESS", p }),
+      onDone: () => dispatch({ type: "SCAN_END" }),
+    }).then((u) => {
+      if (disposed) u();
+      else unlistenHealth = u;
+    });
+
     api.isRunning().then((running) => dispatch({ type: "SET_RUNNING", running }));
 
     return () => {
       disposed = true;
       unlisten?.();
+      unlistenHealth?.();
     };
   }, []);
 
@@ -277,6 +319,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       retryFile: (path) => api.retryFile(path),
       forceFile: (path) => api.forceFile(path),
       clearLog: () => dispatch({ type: "CLEAR_LOG" }),
+      startScan: async (config, deep) => {
+        if (state.scanning) return;
+        dispatch({ type: "SCAN_START", deep });
+        try {
+          await api.scanHealth(config, deep);
+          dispatch({ type: "SCAN_END" });
+        } catch (e) {
+          dispatch({ type: "SCAN_FAIL", error: e instanceof Error ? e.message : "Scan failed." });
+        }
+      },
     }),
     [state],
   );

@@ -6,8 +6,10 @@ import type {
   Detection,
   EnvInfo,
   FfStatus,
+  HealthSummary,
   History,
   HistoryFilter,
+  Library,
   LockStatus,
   ReclaimProjection,
   RunConfig,
@@ -20,6 +22,11 @@ export const api = {
   scanInputs: (inputs: string[]) => invoke<ScanResult>("scan_inputs", { inputs }),
   projectReclaim: (config: RunConfig) =>
     invoke<ReclaimProjection>("project_reclaim", { config }),
+  scanHealth: (config: RunConfig, deep: boolean) =>
+    invoke<HealthSummary>("scan_health", { config, deep }),
+  getLibrary: (filter: HistoryFilter = {}) => invoke<Library>("get_library", { filter }),
+  deleteLibraryPaths: (paths: string[]) =>
+    invoke<number>("delete_library_paths", { paths }),
   startRun: (config: RunConfig) => invoke<void>("start_run", { config }),
   pauseRun: () => invoke<void>("pause_run"),
   resumeRun: () => invoke<void>("resume_run"),

@@ -7,11 +7,13 @@
 
 pub mod abort;
 pub mod config;
+pub mod decode;
 pub mod discover;
 pub mod encode;
 pub mod encoders;
 pub mod estimate;
 pub mod ffbin;
+pub mod health;
 pub mod lock;
 pub mod manifest;
 pub mod paths;

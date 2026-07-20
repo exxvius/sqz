@@ -3,7 +3,7 @@ import type { Tone } from "../lib/status";
 
 interface Props {
   tone: Tone;
-  sym: string;
+  sym: ReactNode;
   name: string;
   fullPath?: string;
   tag?: string;

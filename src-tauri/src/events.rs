@@ -17,6 +17,10 @@ pub const EV_RUN_DONE: &str = "sqz-run-done";
 /// Tier-2 (probe-refined) reclaimable-space projection, emitted after a
 /// `project_reclaim` call finishes its background probe pass.
 pub const EV_PROJECTION: &str = "sqz-projection";
+/// Per-file progress during a library health scan.
+pub const EV_HEALTH_PROGRESS: &str = "sqz-health-progress";
+/// Emitted once when a health scan finishes (payload: the run's summary).
+pub const EV_HEALTH_DONE: &str = "sqz-health-done";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStart {

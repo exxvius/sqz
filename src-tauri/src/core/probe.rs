@@ -64,6 +64,17 @@ impl MediaInfo {
         self.pix_fmt.as_deref().unwrap_or("").contains("12")
     }
 
+    /// Source pixel bit depth (8, 10, or 12), best-effort from the pixel format.
+    pub fn bit_depth(&self) -> u8 {
+        if self.is_12bit() {
+            12
+        } else if self.is_10bit() {
+            10
+        } else {
+            8
+        }
+    }
+
     /// True when the transfer function marks the source as HDR (PQ or HLG).
     pub fn is_hdr(&self) -> bool {
         matches!(

@@ -154,6 +154,25 @@ pub enum VerifyDepth {
     Checksummed,
 }
 
+/// Output bit depth.
+///
+/// `Source` preserves the source's depth (default, safest). Forcing **10-bit**
+/// can improve compression efficiency and reduce banding even from an 8-bit
+/// source, at some encode cost — it's well supported for AV1 and HEVC, but *not*
+/// by hardware H.264 encoders (NVENC/QSV/AMF H.264), which fall back to 8-bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BitDepth {
+    /// Match the source (8/10/12-bit).
+    Source,
+    /// Force 8-bit output.
+    #[serde(rename = "8")]
+    Eight,
+    /// Force 10-bit output.
+    #[serde(rename = "10")]
+    Ten,
+}
+
 /// Scaling filter used when downscaling a source taller than `max_height`.
 ///
 /// The default (Lanczos) is sharpest but *rings* — it overshoots at high-contrast
@@ -230,6 +249,8 @@ pub struct Config {
     pub max_height: u32,
     /// Scaling filter used when a source is downscaled to `max_height`.
     pub scale_filter: ScaleFilter,
+    /// Output bit depth (defaults to matching the source).
+    pub bit_depth: BitDepth,
     pub temp_dir: Option<PathBuf>,
     pub db_path: Option<PathBuf>,
     pub on_success: OnSuccess,
@@ -280,6 +301,7 @@ impl Default for Config {
             min_savings: DEFAULT_MIN_SAVINGS,
             max_height: DEFAULT_MAX_HEIGHT,
             scale_filter: ScaleFilter::Lanczos,
+            bit_depth: BitDepth::Source,
             temp_dir: None,
             db_path: None,
             on_success: OnSuccess::Recycle,

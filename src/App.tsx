@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardView } from "./views/DashboardView";
 import { HistoryView } from "./views/HistoryView";
 import { HomeView } from "./views/HomeView";
+import { LibraryView } from "./views/LibraryView";
 import { Onboarding } from "./views/Onboarding";
 import { SettingsView } from "./views/SettingsView";
 import { api } from "./lib/api";
@@ -9,6 +10,7 @@ import { defaultConfig, fromPersisted, persistable } from "./lib/config";
 import {
   HistoryIcon,
   HomeIcon,
+  LibraryIcon,
   LiveIcon,
   LockIcon,
   Logo,
@@ -21,6 +23,7 @@ import { PasswordModal, type PasswordModalMode } from "./components/PasswordModa
 import { CloseWarningModal } from "./components/CloseWarningModal";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StoreProvider, useStore } from "./lib/store";
+import { ProbeProvider, useProbes } from "./lib/probes";
 import { LockProvider, useLock } from "./lib/lock";
 import { useTheme } from "./lib/theme";
 import { useAccent } from "./lib/accent";
@@ -29,11 +32,12 @@ import { initCursorFx } from "./lib/cursor";
 import type { FfStatus, RunConfig } from "./lib/types";
 import type { ComponentType } from "react";
 
-type View = "home" | "dashboard" | "history" | "settings";
+type View = "home" | "dashboard" | "library" | "history" | "settings";
 
 const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[] = [
   { id: "home", label: "Home", icon: HomeIcon },
   { id: "dashboard", label: "Live", icon: LiveIcon },
+  { id: "library", label: "Library", icon: LibraryIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -87,20 +91,28 @@ function Shell() {
     return () => unlisten?.();
   }, []);
 
+  const probes = useProbes();
   const loaded = useRef(false);
   const [ff, setFf] = useState<FfStatus | null>(null);
-  const refreshFf = useCallback(() => {
+  const refreshFfStatus = useCallback(() => {
     api.ffmpegStatus().then(setFf);
   }, []);
+  // An FFmpeg change (download / custom path / clear) invalidates the cached
+  // hardware + environment probes, so re-run them too.
+  const refreshFf = useCallback(() => {
+    refreshFfStatus();
+    probes.redetect();
+    probes.recheckEnv();
+  }, [refreshFfStatus, probes]);
 
   useEffect(() => {
-    refreshFf();
+    refreshFfStatus();
     // Restore all persisted settings (everything except the input list).
     api.getSettings().then((saved) => {
       setConfig((c) => ({ ...fromPersisted(saved), inputs: c.inputs }));
       loaded.current = true;
     });
-  }, [refreshFf]);
+  }, [refreshFfStatus]);
 
   // Persist settings (debounced) whenever the config changes, once loaded.
   useEffect(() => {
@@ -155,6 +167,8 @@ function Shell() {
         );
       case "dashboard":
         return <DashboardView />;
+      case "library":
+        return <LibraryView config={config} />;
       case "history":
         return <HistoryView />;
       case "settings":
@@ -260,7 +274,9 @@ export default function App() {
   return (
     <StoreProvider>
       <LockProvider>
-        <Shell />
+        <ProbeProvider>
+          <Shell />
+        </ProbeProvider>
       </LockProvider>
     </StoreProvider>
   );

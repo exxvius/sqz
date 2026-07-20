@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::abort::AbortProjection;
-use super::config::{AudioMode, Config, Container};
+use super::config::{AudioMode, BitDepth, Config, Container};
 use super::encoders::{Encoder, EncoderFamily};
 use super::probe::MediaInfo;
 use super::util::command_no_window;
@@ -43,24 +43,55 @@ pub struct ProgressSample {
     pub bitrate_kbps: Option<f64>,
 }
 
-/// Choose the 4:2:0 output pixel format that preserves as much of the source's
-/// bit depth as the chosen encoder can actually carry.
-///
-/// - 8-bit sources → `yuv420p`.
-/// - 10-bit sources → `yuv420p10le` (software) / `p010le` (hardware).
-/// - 12-bit sources → `yuv420p12le` only where the encoder supports it
-///   (currently libx265); everything else can only do 10-bit, so we step down
-///   to 10-bit rather than silently truncating to 8-bit. The step-down is
-///   logged by [`build_args`] so it is never silent.
-fn pix_fmt(info: &MediaInfo, encoder: &Encoder) -> &'static str {
-    if !info.is_10bit() {
-        return "yuv420p"; // 8-bit source
+/// The bit depth the run *wants* for the output: the configured override, or the
+/// source's own depth when set to `Source`.
+fn target_bit_depth(cfg: &Config, info: &MediaInfo) -> u8 {
+    match cfg.bit_depth {
+        BitDepth::Eight => 8,
+        BitDepth::Ten => 10,
+        BitDepth::Source => info.bit_depth(),
     }
-    let supports_12bit = encoder.name == "libx265";
-    if info.is_12bit() && supports_12bit {
+}
+
+/// Hardware H.264 encoders (NVENC/QSV/AMF) are 8-bit only; every other encoder we
+/// target (all AV1/HEVC, plus libx264/libx265) can do 10-bit.
+fn supports_10bit(encoder: &Encoder) -> bool {
+    !matches!(encoder.name.as_str(), "h264_nvenc" | "h264_qsv" | "h264_amf")
+}
+
+/// Bit depth a chosen pixel format actually carries (for step-down logging).
+fn pf_bit_depth(pf: &str) -> u8 {
+    if pf.contains("12") {
+        12
+    } else if pf.contains("10") || pf == "p010le" {
+        10
+    } else {
+        8
+    }
+}
+
+/// Choose the 4:2:0 output pixel format for the target bit depth, stepping down
+/// (never silently up-truncating) to whatever the chosen encoder can carry:
+///
+/// - 8-bit → `yuv420p`.
+/// - 10-bit → `yuv420p10le` (software) / `p010le` (hardware), or `yuv420p` when
+///   the encoder can't do >8-bit (hardware H.264).
+/// - 12-bit → `yuv420p12le` only on libx265; otherwise stepped down to 10-bit.
+///
+/// Any step-down is logged by [`build_args`] so it is never silent.
+fn pix_fmt(cfg: &Config, info: &MediaInfo, encoder: &Encoder) -> &'static str {
+    let target = target_bit_depth(cfg, info);
+    if target <= 8 {
+        return "yuv420p";
+    }
+    if target >= 12 && encoder.name == "libx265" {
         return "yuv420p12le";
     }
-    // 10-bit target: hardware uses the semi-planar p010le; software the planar form.
+    // Want 10-bit (or 12-bit stepped down to 10). Encoders that can't do >8-bit
+    // fall back to 8-bit rather than failing the encode.
+    if !supports_10bit(encoder) {
+        return "yuv420p";
+    }
     match encoder.family {
         EncoderFamily::Software => "yuv420p10le",
         _ => "p010le",
@@ -214,11 +245,13 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
     a.push(encoder.name.clone());
     a.extend(encoder_rate_args(encoder, cfg.resolved_quality()));
 
-    let pf = pix_fmt(info, encoder);
-    if info.is_12bit() && pf != "yuv420p12le" {
+    let pf = pix_fmt(cfg, info, encoder);
+    let (target, out_depth) = (target_bit_depth(cfg, info), pf_bit_depth(pf));
+    if out_depth < target {
         tracing::warn!(
             encoder = %encoder.name,
-            "12-bit source encoded at 10-bit: {} lacks 12-bit encode support",
+            target, out_depth,
+            "requested {target}-bit output stepped down to {out_depth}-bit: {} can't carry it",
             encoder.name
         );
     }
@@ -429,7 +462,7 @@ pub fn run_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::config::{AudioMode, Codec, Config, Container, ScaleFilter};
+    use super::super::config::{AudioMode, BitDepth, Codec, Config, Container, ScaleFilter};
     use super::super::encoders::Encoder;
     use std::path::PathBuf;
 
@@ -506,19 +539,61 @@ mod tests {
     #[test]
     fn software_ten_bit_uses_planar_form() {
         let e = enc("libx265", EncoderFamily::Software);
-        assert_eq!(pix_fmt(&info(1080, true), &e), "yuv420p10le");
+        assert_eq!(pix_fmt(&Config::default(), &info(1080, true), &e), "yuv420p10le");
     }
 
     #[test]
     fn twelve_bit_preserved_on_libx265_but_stepped_down_elsewhere() {
+        let cfg = Config::default(); // Source depth
         let mut m = info(1080, false);
         m.pix_fmt = Some("yuv420p12le".into());
         // libx265 keeps 12-bit.
-        assert_eq!(pix_fmt(&m, &enc("libx265", EncoderFamily::Software)), "yuv420p12le");
+        assert_eq!(pix_fmt(&cfg, &m, &enc("libx265", EncoderFamily::Software)), "yuv420p12le");
         // SVT-AV1 is 8/10-bit only → step down to 10-bit, never truncate to 8.
-        assert_eq!(pix_fmt(&m, &enc("libsvtav1", EncoderFamily::Software)), "yuv420p10le");
+        assert_eq!(pix_fmt(&cfg, &m, &enc("libsvtav1", EncoderFamily::Software)), "yuv420p10le");
         // Hardware caps at 10-bit → p010le.
-        assert_eq!(pix_fmt(&m, &enc("av1_nvenc", EncoderFamily::Nvenc)), "p010le");
+        assert_eq!(pix_fmt(&cfg, &m, &enc("av1_nvenc", EncoderFamily::Nvenc)), "p010le");
+    }
+
+    #[test]
+    fn forced_ten_bit_upgrades_an_eight_bit_source() {
+        let cfg = Config { bit_depth: BitDepth::Ten, ..Config::default() };
+        // Software AV1/HEVC → planar 10-bit; hardware → p010le.
+        assert_eq!(
+            pix_fmt(&cfg, &info(1080, false), &enc("libsvtav1", EncoderFamily::Software)),
+            "yuv420p10le"
+        );
+        assert_eq!(
+            pix_fmt(&cfg, &info(1080, false), &enc("hevc_nvenc", EncoderFamily::Nvenc)),
+            "p010le"
+        );
+        // End to end, the pix_fmt flag is emitted.
+        let a = build_args(&cfg, &info(1080, false), &enc("av1_nvenc", EncoderFamily::Nvenc), Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-pix_fmt p010le"));
+    }
+
+    #[test]
+    fn forced_eight_bit_downgrades_a_ten_bit_source() {
+        let cfg = Config { bit_depth: BitDepth::Eight, ..Config::default() };
+        assert_eq!(
+            pix_fmt(&cfg, &info(1080, true), &enc("libx265", EncoderFamily::Software)),
+            "yuv420p"
+        );
+    }
+
+    #[test]
+    fn ten_bit_steps_down_for_hardware_h264() {
+        // NVENC H.264 is 8-bit only — forcing 10-bit must fall back, not fail.
+        let cfg = Config { bit_depth: BitDepth::Ten, ..Config::default() };
+        assert_eq!(
+            pix_fmt(&cfg, &info(1080, false), &enc("h264_nvenc", EncoderFamily::Nvenc)),
+            "yuv420p"
+        );
+        // libx264 (software) can do 10-bit.
+        assert_eq!(
+            pix_fmt(&cfg, &info(1080, false), &enc("libx264", EncoderFamily::Software)),
+            "yuv420p10le"
+        );
     }
 
     #[test]

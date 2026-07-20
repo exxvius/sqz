@@ -48,6 +48,155 @@ export function HistoryIcon({ size = 18 }: IconProps) {
   );
 }
 
+export function LibraryIcon({ size = 18 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m11.5 14.5l7-4.5l-7-4.5zM8 18q-.825 0-1.412-.587T6 16V4q0-.825.588-1.412T8 2h12q.825 0 1.413.588T22 4v12q0 .825-.587 1.413T20 18zm0-2h12V4H8zm-4 6q-.825 0-1.412-.587T2 20V6h2v14h14v2zM8 4v12z" />
+    </svg>
+  );
+}
+
+/** Checkmark — a healthy / re-encoded status symbol. */
+export function CheckIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m9.55 18l-5.7-5.7l1.425-1.425L9.55 15.15l9.175-9.175L20.15 7.4z" />
+    </svg>
+  );
+}
+
+/** Exclamation — a warning / playback-caveat status symbol. */
+export function AlertIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M11 14V5h2v9zm0 5v-2h2v2z" />
+    </svg>
+  );
+}
+
+/** Magnifying glass — the health scan action. */
+export function SearchIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M18.319 14.433A8.001 8.001 0 0 0 6.343 3.868a8 8 0 0 0 10.564 11.976l.043.045l4.242 4.243a1 1 0 1 0 1.415-1.415l-4.243-4.242zm-2.076-9.15a6 6 0 1 1-8.485 8.485a6 6 0 0 1 8.485-8.485"
+      />
+    </svg>
+  );
+}
+
+/** Magnifying glass with a focused core — the deep (decode) scan action. */
+export function DeepScanIcon({ size = 13 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M5 11a6 6 0 1 1 12 0a6 6 0 0 1-12 0m6-8a8 8 0 1 0 4.906 14.32l3.387 3.387a1 1 0 0 0 1.414-1.414l-3.387-3.387A8 8 0 0 0 11 3m0 12a4 4 0 1 0 0-8a4 4 0 0 0 0 8"
+      />
+    </svg>
+  );
+}
+
+/** Cross — a failed / corrupt / unreadable status symbol. */
+export function FailIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M6.4 19L5 17.6l5.6-5.6L5 6.4L6.4 5l5.6 5.6L17.6 5L19 6.4L13.4 12l5.6 5.6l-1.4 1.4l-5.6-5.6z" />
+    </svg>
+  );
+}
+
+/** Two curved arrows — a container-normalized (remuxed) status symbol. */
+export function NormalizedIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M4 20v-2h2.75l-.4-.35q-1.225-1.225-1.787-2.662T4 12.05q0-2.775 1.663-4.937T10 4.25v2.1Q8.2 7 7.1 8.563T6 12.05q0 1.125.425 2.188T7.75 16.2l.25.25V14h2v6zm10-.25v-2.1q1.8-.65 2.9-2.212T18 11.95q0-1.125-.425-2.187T16.25 7.8L16 7.55V10h-2V4h6v2h-2.75l.4.35q1.225 1.225 1.788 2.663T20 11.95q0 2.775-1.662 4.938T14 19.75" />
+    </svg>
+  );
+}
+
+/** Skip-forward bar — an already-efficient status symbol. */
+export function EfficientIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M16.5 18V6h2v12zm-11 0V6l9 6z" />
+    </svg>
+  );
+}
+
+/** Equals bars — a no-gain / kept-original status symbol. */
+export function NoGainIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M4 17v-3h16v3zm0-7V7h16v3z" />
+    </svg>
+  );
+}
+
+/** Spinning arc — an in-progress status symbol. Uses a CSS animation (not SMIL)
+ *  so it starts spinning the instant it renders, with no first-frame delay. */
+export function ProcessingIcon({ size = 16 }: IconProps) {
+  return (
+    <svg className="spin" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 3c4.97 0 9 4.03 9 9"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Wave — a lean / marginal (skipped) status symbol. */
+export function LeanIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="currentColor" aria-hidden>
+      <path d="M225.35 133.1c-15.22 18.93-30.43 29-46.5 30.65a47 47 0 0 1-4.85.25c-20.81 0-38.16-14.13-53.59-26.7c-14.24-11.6-27.68-22.54-40.75-21.18c-9.26 1-19.46 8.32-30.32 21.82a12 12 0 0 1-18.7-15C45.87 104 61.08 94 77.15 92.25c23-2.42 41.82 12.92 58.43 26.45c14.24 11.6 27.68 22.54 40.75 21.18c9.26-1 19.46-8.32 30.32-21.82a12 12 0 1 1 18.7 15Z" />
+    </svg>
+  );
+}
+
+/** Small hollow ring — a pending status symbol. */
+export function PendingIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+      <path d="M7.5 4.875a2.625 2.625 0 1 1 0 5.25a2.625 2.625 0 0 1 0-5.25m0 1a1.625 1.625 0 1 0 0 3.25a1.625 1.625 0 0 0 0-3.25" />
+    </svg>
+  );
+}
+
+/** Small solid dot — a dry-run ("would encode") status symbol. */
+export function DryRunIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+      <path d="M4.5 7.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0" />
+    </svg>
+  );
+}
+
+/** Solid dot — a not-yet-scanned library status symbol. */
+export function NotScannedIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="currentColor" aria-hidden>
+      <path stroke="currentColor" strokeWidth={4} d="M24 33a9 9 0 1 0 0-18a9 9 0 0 0 0 18Z" />
+    </svg>
+  );
+}
+
+/** Cross in a circle — a cancelled status symbol. */
+export function CancelledIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m8.4 17l3.6-3.6l3.6 3.6l1.4-1.4l-3.6-3.6L17 8.4L15.6 7L12 10.6L8.4 7L7 8.4l3.6 3.6L7 15.6zm3.6 5q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22m0-2q3.35 0 5.675-2.325T20 12t-2.325-5.675T12 4T6.325 6.325T4 12t2.325 5.675T12 20" />
+    </svg>
+  );
+}
+
 export function SettingsIcon({ size = 18 }: IconProps) {
   return (
     <svg {...filled(size)}>

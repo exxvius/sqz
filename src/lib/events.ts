@@ -1,7 +1,15 @@
 // Event name constants + typed listeners. Names mirror src-tauri/src/events.rs.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { FileEnd, FileProgress, FileStart, ProcessResult, RunSummary } from "./types";
+import type {
+  FileEnd,
+  FileProgress,
+  FileStart,
+  HealthProgress,
+  HealthSummary,
+  ProcessResult,
+  RunSummary,
+} from "./types";
 
 export const EV = {
   fileStart: "sqz-file-start",
@@ -11,7 +19,21 @@ export const EV = {
   runStart: "sqz-run-start",
   runDone: "sqz-run-done",
   projection: "sqz-projection",
+  healthProgress: "sqz-health-progress",
+  healthDone: "sqz-health-done",
 } as const;
+
+/** Subscribe to health-scan progress + completion; returns an unlisten fn. */
+export async function subscribeHealth(handlers: {
+  onProgress?: (p: HealthProgress) => void;
+  onDone?: (s: HealthSummary) => void;
+}): Promise<UnlistenFn> {
+  const unlisteners: UnlistenFn[] = await Promise.all([
+    listen<HealthProgress>(EV.healthProgress, (e) => handlers.onProgress?.(e.payload)),
+    listen<HealthSummary>(EV.healthDone, (e) => handlers.onDone?.(e.payload)),
+  ]);
+  return () => unlisteners.forEach((u) => u());
+}
 
 export interface EngineHandlers {
   onFileStart?: (p: FileStart) => void;

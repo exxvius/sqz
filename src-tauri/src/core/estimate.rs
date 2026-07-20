@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use super::config::{Codec, Config};
+use super::config::{BitDepth, Codec, Config};
 use super::manifest::BucketAggRow;
 use super::probe::MediaInfo;
 
@@ -26,15 +26,23 @@ const SHRINKAGE_K: f64 = 20.0;
 
 // ---- Skip predicates (shared with the pipeline) ----------------------------
 
-/// Skip files already in the target codec at/under the height cap. Avoids
-/// pointless re-encodes and prevents reprocessing our own output.
+/// Skip files already in the target codec at/under the height cap *and* already
+/// at the requested bit depth. Avoids pointless re-encodes and prevents
+/// reprocessing our own output — but a file at the wrong bit depth (e.g. an 8-bit
+/// source when 10-bit is requested) is still a worthwhile re-encode.
 pub fn is_already_efficient(cfg: &Config, info: &MediaInfo) -> bool {
     let codec_ok = info
         .codec
         .as_deref()
         .map(|c| cfg.codec.probe_names().contains(&c))
         .unwrap_or(false);
-    codec_ok && info.height.map(|h| h <= cfg.max_height).unwrap_or(false)
+    let height_ok = info.height.map(|h| h <= cfg.max_height).unwrap_or(false);
+    let depth_ok = match cfg.bit_depth {
+        BitDepth::Source => true,
+        BitDepth::Eight => info.bit_depth() == 8,
+        BitDepth::Ten => info.bit_depth() == 10,
+    };
+    codec_ok && height_ok && depth_ok
 }
 
 /// Predict, before encoding, whether the re-encode is worth it. Downscaled files
@@ -343,6 +351,27 @@ mod tests {
         assert!(is_already_efficient(&cfg, &info("av1", Some(1080), None)));
         assert!(!is_already_efficient(&cfg, &info("av1", Some(2160), None))); // too tall
         assert!(!is_already_efficient(&cfg, &info("h264", Some(720), None))); // wrong codec
+    }
+
+    #[test]
+    fn wrong_bit_depth_is_not_already_efficient() {
+        // Target AV1 1080p, but now demanding 10-bit output.
+        let cfg = Config {
+            codec: Codec::Av1,
+            max_height: 1080,
+            bit_depth: BitDepth::Ten,
+            ..Config::default()
+        };
+        // An 8-bit AV1 1080p file is NOT efficient — it should re-encode to 10-bit.
+        let eight_bit = info("av1", Some(1080), None); // helper builds yuv420p (8-bit)
+        assert!(!is_already_efficient(&cfg, &eight_bit));
+        // A 10-bit AV1 1080p file already satisfies the target → efficient.
+        let mut ten_bit = info("av1", Some(1080), None);
+        ten_bit.pix_fmt = Some("yuv420p10le".into());
+        assert!(is_already_efficient(&cfg, &ten_bit));
+        // With Source depth, an 8-bit file stays efficient (depth isn't a driver).
+        let src_cfg = Config { bit_depth: BitDepth::Source, ..cfg };
+        assert!(is_already_efficient(&src_cfg, &eight_bit));
     }
 
     #[test]

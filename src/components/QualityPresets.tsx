@@ -41,6 +41,13 @@ export function QualityPresets({ codec, quality, onCodec, onQuality }: Props) {
         <span className="muted">{CODECS.find((c) => c.id === codec)?.note}</span>
       </div>
 
+      {codec === "av1" && (
+        <p className="muted compat-note">
+          Heads-up: AV1 can't Direct Play on many older Plex, TV, and browser clients — they may
+          transcode or fail to play. Great for archives; check your playback devices first.
+        </p>
+      )}
+
       <div className="presets">
         {PRESETS.map((p) => (
           <button

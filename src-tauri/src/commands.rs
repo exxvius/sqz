@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,16 +11,20 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::core::config::{Config, OnSuccess, HOLDING_DIRNAME};
+use crate::core::decode::decode_probe;
 use crate::core::discover::discover;
 use crate::core::encoders::{self, Detection};
 use crate::core::estimate::{self, ProbedFile, ReclaimProjection};
 use crate::core::ffbin::FfBin;
+use crate::core::health::{classify, HealthState};
 use crate::core::lock::Lock;
-use crate::core::manifest::{HistoryQuery, HistoryRow, Manifest};
+use crate::core::manifest::{mtime_secs, HistoryQuery, HistoryRow, LibraryRow, Manifest};
 use crate::core::paths::holding_path_for;
-use crate::core::probe::probe_many;
+use crate::core::probe::{probe, probe_many};
 use crate::core::util::command_no_window;
-use crate::events::{TauriReporter, EV_PROJECTION, EV_RUN_DONE};
+use crate::events::{
+    TauriReporter, EV_HEALTH_DONE, EV_HEALTH_PROGRESS, EV_PROJECTION, EV_RUN_DONE,
+};
 use crate::run::{run, ActiveMap, RunSummary};
 
 /// Per-run steering flags shared between a command handler and the run thread.
@@ -40,6 +44,9 @@ pub struct AppState {
     /// Cancel token for the in-flight reclaimable-space projection (Tier-2 probe
     /// pass). A new projection request cancels the previous one.
     pub projection: Mutex<Option<Arc<AtomicBool>>>,
+    /// Cancel token for the in-flight library health scan. A new scan cancels the
+    /// previous one, so a changing input set never leaves two scans racing.
+    pub health: Mutex<Option<Arc<AtomicBool>>>,
     /// Password-gated lock: masks personal info and makes the app read-only.
     pub lock: Lock,
 }
@@ -54,6 +61,7 @@ impl AppState {
             run: Mutex::new(None),
             active: Arc::new(Mutex::new(HashMap::new())),
             projection: Mutex::new(None),
+            health: Mutex::new(None),
             lock,
         }
     }
@@ -347,6 +355,205 @@ pub async fn project_reclaim(
     Ok(tier1_proj)
 }
 
+/// Tally of a health scan's outcomes.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HealthSummary {
+    pub scanned: u32,
+    pub healthy: u32,
+    pub corrupt: u32,
+    pub unreadable: u32,
+    /// Whether a decode pass ran (deep scan) vs. structural-only.
+    pub deep: bool,
+    /// True if the scan was superseded/cancelled before finishing.
+    pub cancelled: bool,
+}
+
+/// Per-file health-scan progress event payload.
+#[derive(Debug, Clone, Serialize)]
+struct HealthProgress {
+    scanned: u32,
+    total: u32,
+    path: String,
+    health: String,
+}
+
+/// Scan a library for health without re-encoding anything.
+///
+/// Discovers `config.inputs`, records each file into the manifest as `indexed`
+/// (never queued for encoding), then probes every file for structural validity.
+/// When `deep`, it additionally decode-probes each source to catch silent
+/// corruption — the expensive path, so it's opt-in.
+///
+/// Emits `sqz-health-progress` per file and `sqz-health-done` with the summary.
+/// A fresh call cancels any in-flight scan, so a changing input set never races.
+#[tauri::command]
+pub async fn scan_health(
+    app: AppHandle,
+    config: Config,
+    deep: bool,
+    state: State<'_, AppState>,
+) -> Result<HealthSummary, String> {
+    let db = state.db_path();
+    let ff = state.ff();
+    if !ff.is_present() {
+        return Err("FFmpeg isn't set up yet. Add it from Settings first.".into());
+    }
+
+    // Install a fresh cancel token, cancelling any previous scan.
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut guard = state.health.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.store(true, Ordering::Relaxed);
+        }
+        *guard = Some(Arc::clone(&cancel));
+    }
+
+    let cfg = config;
+    let workers = cfg.resolved_workers();
+    tauri::async_runtime::spawn_blocking(move || -> Result<HealthSummary, String> {
+        let manifest = Manifest::open(&db).map_err(|e| e.to_string())?;
+
+        // Discover + register every file as indexed (leaves existing rows alone).
+        let sized: Vec<(PathBuf, u64)> = discover(&cfg)
+            .into_iter()
+            .filter_map(|p| std::fs::metadata(&p).ok().map(|m| (p, m)))
+            .map(|(p, m)| {
+                let _ = manifest.upsert_indexed(&p.to_string_lossy(), m.len(), mtime_secs(&m));
+                (p, m.len())
+            })
+            .collect();
+
+        let n = sized.len();
+        let total = n as u32;
+
+        if cancel.load(Ordering::Relaxed) || n == 0 {
+            let summary = HealthSummary {
+                deep,
+                cancelled: cancel.load(Ordering::Relaxed),
+                ..Default::default()
+            };
+            let _ = app.emit(EV_HEALTH_DONE, &summary);
+            return Ok(summary);
+        }
+
+        // Process files in a bounded worker pool: each worker probes (and, on a
+        // deep scan, decodes) one file at a time, records its health, and emits
+        // progress the moment it finishes — so the bar advances smoothly for both
+        // the fast structural pass and the slow deep pass.
+        let next = AtomicUsize::new(0);
+        let done = AtomicU32::new(0);
+        let summary = Mutex::new(HealthSummary {
+            deep,
+            ..Default::default()
+        });
+        let pool = workers.max(1).min(n);
+
+        std::thread::scope(|scope| {
+            for _ in 0..pool {
+                scope.spawn(|| loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= n {
+                        break;
+                    }
+                    let path = &sized[i].0;
+                    let path_str = path.to_string_lossy().to_string();
+
+                    let info = probe(&ff.ffprobe, path, Duration::from_secs(60)).ok();
+                    // Deep scan decodes each readable source to catch silent corruption.
+                    let decoded = match (deep, &info) {
+                        (true, Some(_)) => {
+                            Some(decode_probe(&ff.ffmpeg, path, cfg.resolved_verify_depth()).0)
+                        }
+                        _ => None,
+                    };
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    let health = classify(info.is_some(), decoded);
+
+                    // The stored detail explains a bad verdict.
+                    let detail: Option<String> = match health {
+                        HealthState::Corrupt => {
+                            Some("decode errors — likely truncated or corrupted".into())
+                        }
+                        HealthState::Unreadable => Some("ffprobe could not read this file".into()),
+                        HealthState::Healthy => None,
+                    };
+                    let (codec, height) = info
+                        .as_ref()
+                        .map(|mi| (mi.codec.clone(), mi.height))
+                        .unwrap_or((None, None));
+
+                    let _ = manifest.record_health(
+                        &path_str,
+                        health.as_str(),
+                        detail.as_deref(),
+                        codec.as_deref(),
+                        height,
+                    );
+
+                    let scanned = done.fetch_add(1, Ordering::Relaxed) + 1;
+                    {
+                        let mut s = summary.lock().unwrap();
+                        s.scanned += 1;
+                        match health {
+                            HealthState::Healthy => s.healthy += 1,
+                            HealthState::Corrupt => s.corrupt += 1,
+                            HealthState::Unreadable => s.unreadable += 1,
+                        }
+                    }
+                    let _ = app.emit(
+                        EV_HEALTH_PROGRESS,
+                        HealthProgress {
+                            scanned,
+                            total,
+                            path: path_str,
+                            health: health.as_str().to_string(),
+                        },
+                    );
+                });
+            }
+        });
+
+        let mut summary = summary.into_inner().unwrap();
+        summary.cancelled = cancel.load(Ordering::Relaxed);
+        let _ = app.emit(EV_HEALTH_DONE, &summary);
+        Ok(summary)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The library view: all known files with health + a per-state count summary.
+#[derive(Debug, Clone, Serialize)]
+pub struct Library {
+    /// Counts by health state, with never-scanned files under `"unscanned"`.
+    pub counts: HashMap<String, i64>,
+    pub rows: Vec<LibraryRow>,
+}
+
+#[tauri::command]
+pub async fn get_library(
+    filter: HistoryFilter,
+    state: State<'_, AppState>,
+) -> Result<Library, String> {
+    let db = state.db_path();
+    tauri::async_runtime::spawn_blocking(move || {
+        let m = Manifest::open(&db).map_err(|e| e.to_string())?;
+        Ok(Library {
+            counts: m.health_counts().map_err(|e| e.to_string())?,
+            rows: m.library(&filter.into()).map_err(|e| e.to_string())?,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Inject the managed db path and a default holding dir, then validate.
 fn finalize_config(state: &AppState, mut cfg: Config) -> Result<Config, String> {
     cfg.db_path = Some(state.db_path());
@@ -625,6 +832,27 @@ pub async fn delete_history_matching(
         Manifest::open(&db)
             .map_err(|e| e.to_string())?
             .delete_matching(&filter.into())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Remove files from the Library health list by path — the library view's
+/// "remove" actions. Clears the health annotation (dropping the file from the
+/// Library) while keeping any pipeline-history row for the History view; a
+/// scan-only row is deleted outright. Never affects History/predictions data.
+#[tauri::command]
+pub async fn delete_library_paths(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    guard_locked(&state)?;
+    let db = state.db_path();
+    tauri::async_runtime::spawn_blocking(move || {
+        Manifest::open(&db)
+            .map_err(|e| e.to_string())?
+            .remove_from_library(&paths)
             .map_err(|e| e.to_string())
     })
     .await

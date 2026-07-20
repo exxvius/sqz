@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { PasswordModal } from "../components/PasswordModal";
@@ -7,9 +7,10 @@ import { Select } from "../components/Select";
 import { api } from "../lib/api";
 import { ACCENTS, type Accent } from "../lib/accent";
 import { useLock } from "../lib/lock";
+import { useProbes } from "../lib/probes";
 import type { CloseBehavior } from "../lib/closeBehavior";
 import type { Theme } from "../lib/theme";
-import type { EnvInfo, FfStatus } from "../lib/types";
+import type { FfStatus } from "../lib/types";
 
 interface Props {
   theme: Theme;
@@ -38,21 +39,12 @@ export function SettingsView({
 }: Props) {
   const lock = useLock();
   const { confirm, element: confirmModal } = useConfirm();
+  // Environment is probed once at app root and cached, so re-visiting Settings no
+  // longer re-checks the environment each time.
+  const { env, envLoading, recheckEnv: loadEnv } = useProbes();
   const [cleared, setCleared] = useState(false);
-  const [env, setEnv] = useState<EnvInfo | null>(null);
-  const [envLoading, setEnvLoading] = useState(false);
   const [configMsg, setConfigMsg] = useState<string | null>(null);
   const [changePw, setChangePw] = useState(false);
-
-  const loadEnv = () => {
-    setEnvLoading(true);
-    api
-      .environment()
-      .then(setEnv)
-      .catch(() => setEnv(null))
-      .finally(() => setEnvLoading(false));
-  };
-  useEffect(loadEnv, []);
 
   const exportConfig = async () => {
     const dest = await save({

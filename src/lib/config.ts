@@ -12,6 +12,7 @@ export const defaultConfig = (): RunConfig => ({
   min_savings: 0.1,
   max_height: 1080,
   scale_filter: "lanczos",
+  bit_depth: "source",
   on_success: "recycle",
   holding_dir: null,
   holding_retention_days: 0,
