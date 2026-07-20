@@ -11,7 +11,7 @@ import {
 } from "../components/icons";
 import { api, openFile, pickInputs, revealFile } from "../lib/api";
 import { defaultConfig } from "../lib/config";
-import { fileName, humanBytes, pct, relativeTime } from "../lib/format";
+import { currentPath, fileName, humanBytes, pct, relativeTime } from "../lib/format";
 import { healthMeta, statusMeta } from "../lib/status";
 import { useLock } from "../lib/lock";
 import { useStore } from "../lib/store";
@@ -180,7 +180,13 @@ export function LibraryView({ config }: { config: RunConfig }) {
   const counts = library?.counts ?? {};
   const allRows = (library?.rows ?? []).filter((r) => {
     if (filters.size > 0 && (r.health === null || !filters.has(r.health))) return false;
-    if (search && !r.path.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search) {
+      // Match the file that exists now (a done source resolves to its .mkv), so
+      // searching for the real on-disk name finds the row the card displays.
+      const encoded = r.status === "done" || r.status === "normalized";
+      const p = currentPath(r.path, encoded).toLowerCase();
+      if (!p.includes(search.toLowerCase())) return false;
+    }
     return true;
   });
   const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
@@ -455,12 +461,19 @@ export function LibraryView({ config }: { config: RunConfig }) {
           pageRows.map((r) => {
             const h = healthMeta(r.health);
             const s = statusMeta(r.status);
+            // A re-encoded/normalized source was rewritten to the run's container
+            // (.mkv); its original extension went to the trash. Open/reveal must
+            // point at the file that exists now — the raw path is the gone original.
+            // (Same resolution History uses; the manifest keeps the source path as
+            // the row's identity, so Remove still targets r.path.)
+            const encoded = r.status === "done" || r.status === "normalized";
+            const filePath = currentPath(r.path, encoded);
             const actions = locked ? null : (
               <>
-                <button className="mini-btn" onClick={() => openFile(r.path)}>
+                <button className="mini-btn" onClick={() => openFile(filePath)}>
                   <PlayIcon /> Open
                 </button>
-                <button className="mini-btn" onClick={() => revealFile(r.path)}>
+                <button className="mini-btn" onClick={() => revealFile(filePath)}>
                   <FolderIcon /> Folder
                 </button>
                 <button className="mini-btn danger" onClick={() => removeOne(r.path)}>
@@ -473,15 +486,15 @@ export function LibraryView({ config }: { config: RunConfig }) {
                 key={r.path}
                 tone={h.tone}
                 sym={h.sym}
-                name={maskName(fileName(r.path))}
-                fullPath={locked ? undefined : r.path}
+                name={maskName(fileName(filePath))}
+                fullPath={locked ? undefined : filePath}
                 tag={h.label}
                 meta={<span className="ecard-meta">{relativeTime(r.health_checked_at)}</span>}
                 actions={actions}
               >
                 <dl className="kv-grid">
                   <dt>path</dt>
-                  <dd>{maskPath(r.path)}</dd>
+                  <dd>{maskPath(filePath)}</dd>
                   <dt>health</dt>
                   <dd>{h.label}</dd>
                   {r.health_detail && (
