@@ -502,6 +502,10 @@
 .vmaf-slider {
   margin-top: var(--space-3);
 }
+.vmaf-sampling {
+  margin-top: var(--space-2);
+  align-items: flex-start;
+}
 /* Label + slider share one row; the hint sits on the line below. */
 .vmaf-row {
   display: flex;
@@ -1703,6 +1707,20 @@
   color: var(--bad);
   background: color-mix(in oklab, var(--bad) 8%, transparent);
   border: 1px solid color-mix(in oklab, var(--bad) 25%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+}
+/* Non-fatal diagnostic note (e.g. a pipeline fallback that still succeeded). */
+.note-box {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: color-mix(in oklab, var(--warn) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--warn) 22%, transparent);
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   margin: var(--space-2) 0;

@@ -26,9 +26,6 @@ use super::ffbin::FfBin;
 use super::probe::MediaInfo;
 use super::util::command_no_window;
 
-/// Number of samples taken across a title, and each sample's length (seconds).
-pub const VMAF_SAMPLES: usize = 3;
-pub const VMAF_SAMPLE_SECS: f64 = 15.0;
 /// Default target if VMAF mode is on but no value was supplied (the UI always
 /// sends one; this is a floor for headless/config-only use).
 pub const VMAF_DEFAULT_TARGET: f64 = 95.0;
@@ -52,6 +49,11 @@ pub struct VmafResult {
     pub vmaf: f64,
     /// Sample-encode rounds spent (telemetry / cost surfacing).
     pub probes: u32,
+    /// Whether a CRF meeting the target was actually found. `false` means the
+    /// target was unreachable even at the best quality (`crf == bounds.min`), so
+    /// `vmaf` is the best achievable — the caller should not treat `crf` as a real
+    /// answer (encoding at it would be near-lossless, often bigger than the source).
+    pub met_target: bool,
 }
 
 /// Per-codec CRF search bounds, centered near the codec's balanced base so the
@@ -79,11 +81,33 @@ pub fn max_probes(bounds: CrfBounds) -> u32 {
 pub fn sample_plan(width: Option<u32>, height: Option<u32>) -> (usize, f64) {
     let px = width.unwrap_or(1920) as u64 * height.unwrap_or(1080) as u64;
     const MP: u64 = 1_000_000;
+    // Always take enough windows (>=4) that one pathological scene — an intro,
+    // title card, fade or scene-cut that VMAF scores oddly low and flat across CRF
+    // — can be trimmed as an outlier instead of dragging the whole result into a
+    // bottom-out. Windows shorten as the frame grows, to bound decode/encode cost.
     match px {
-        p if p > 16 * MP => (2, 8.0),          // > ~4K: 6K/8K/VR
-        p if p > 4 * MP => (3, 12.0),          // > 1080p up to ~4K
-        _ => (VMAF_SAMPLES, VMAF_SAMPLE_SECS), // ≤ 1080p
+        p if p > 16 * MP => (4, 6.0),  // 6K/8K/VR
+        p if p > 4 * MP => (4, 10.0),  // > 1080p up to ~4K
+        _ => (4, 12.0),                // <= 1080p
     }
+}
+
+/// Aggregate per-sample VMAF into one figure for the search. With enough samples
+/// (>=4), trim the single worst window: a scene that scores pathologically low and
+/// *flat across CRF* is a measurement artifact (intro/title/scene-cut), and with
+/// few samples that one outlier would bottom the search out. Fewer samples fall
+/// back to a plain mean.
+pub fn aggregate_vmaf(scores: &[f64]) -> f64 {
+    if scores.is_empty() {
+        return 0.0;
+    }
+    if scores.len() >= 4 {
+        let mut s = scores.to_vec();
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let kept = &s[1..]; // drop the lowest
+        return kept.iter().sum::<f64>() / kept.len() as f64;
+    }
+    scores.iter().sum::<f64>() / scores.len() as f64
 }
 
 /// Pick `samples` evenly-spread windows of `secs` seconds across `duration`,
@@ -143,15 +167,21 @@ pub fn search_crf(
         }
     }
 
-    let (crf, vmaf) = match best {
-        Some(b) => b,
+    let (crf, vmaf, met_target) = match best {
+        Some((c, v)) => (c, v, true),
         None => {
-            // Nothing met the target; encode at best quality (min CRF) anyway.
+            // Nothing met the target; report the best achievable (min CRF) so the
+            // caller can decide (it should NOT encode near-lossless — see below).
             let v = measure_cached(bounds.min, measure, &mut cache, &mut probes)?;
-            (bounds.min, v)
+            (bounds.min, v, false)
         }
     };
-    Some(VmafResult { crf, vmaf, probes })
+    Some(VmafResult {
+        crf,
+        vmaf,
+        probes,
+        met_target,
+    })
 }
 
 fn measure_cached(
@@ -195,13 +225,24 @@ pub fn resolve_crf(
     on_progress: &dyn Fn(f64),
 ) -> Option<VmafResult> {
     let duration = info.duration.unwrap_or(0.0);
-    let (samples, secs) = sample_plan(info.width, info.height);
+    // Auto plan from the resolution, overridden by the user's explicit choices
+    // (a speed vs. accuracy knob): 0 means "auto" for either dimension.
+    let (auto_n, auto_secs) = sample_plan(info.width, info.height);
+    let samples = if cfg.vmaf_samples > 0 { cfg.vmaf_samples } else { auto_n };
+    let secs = if cfg.vmaf_sample_secs > 0.0 { cfg.vmaf_sample_secs } else { auto_secs };
     let windows = sample_windows(duration, samples, secs);
     if windows.is_empty() {
         return None;
     }
     let bounds = bounds_for(cfg.codec);
     let n = windows.len();
+    tracing::info!(
+        target,
+        codec = ?cfg.codec,
+        windows = ?windows,
+        crf_range = ?(bounds.min, bounds.max),
+        "VMAF search: sampling {} window(s)", n
+    );
     // Work units: one to extract each window's reference, then one per sample
     // across the worst-case probe count.
     let total_units = (n + max_probes(bounds) as usize * n) as f64;
@@ -256,10 +297,26 @@ pub fn resolve_crf(
             on_progress((completed.get() as f64 / total_units).min(0.999));
             scores.push(s);
         }
-        (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64)
+        if scores.is_empty() {
+            return None;
+        }
+        let vmaf = aggregate_vmaf(&scores);
+        // Log the aggregate AND every per-sample score, so a suspicious result (e.g.
+        // one window pinned low and flat across CRF) is visible and checkable.
+        tracing::info!(crf, vmaf, per_sample = ?scores, "VMAF search: probe");
+        Some(vmaf)
     };
 
     let result = search_crf(bounds, target, &measure);
+    if let Some(r) = &result {
+        tracing::info!(
+            crf = r.crf,
+            vmaf = r.vmaf,
+            probes = r.probes,
+            met_target = r.met_target,
+            "VMAF search: resolved"
+        );
+    }
     cleanup_refs(&refs);
     result
 }
@@ -530,6 +587,7 @@ mod tests {
         // 100 - crf >= 90  ⇒  crf <= 10; highest is 10.
         assert_eq!(r.crf, 10);
         assert!((r.vmaf - 90.0).abs() < 1e-9);
+        assert!(r.met_target);
     }
 
     #[test]
@@ -539,6 +597,7 @@ mod tests {
         let r = search_crf(CrfBounds { min: 20, max: 45 }, 95.0, &measure).unwrap();
         assert_eq!(r.crf, 20);
         assert!((r.vmaf - 80.0).abs() < 1e-9);
+        assert!(!r.met_target); // unreachable — the caller must not encode at min
     }
 
     #[test]
@@ -577,15 +636,23 @@ mod tests {
     }
 
     #[test]
-    fn sample_plan_shrinks_for_large_frames() {
-        // ≤1080p keeps the full plan.
-        assert_eq!(sample_plan(Some(1920), Some(1080)), (VMAF_SAMPLES, VMAF_SAMPLE_SECS));
-        // ~4K: same count, shorter windows.
-        assert_eq!(sample_plan(Some(3840), Some(2160)), (3, 12.0));
-        // 8K/VR: fewer and shorter.
-        assert_eq!(sample_plan(Some(7680), Some(4320)), (2, 8.0));
-        // Unknown dimensions fall back to the 1080p plan, never something heavier.
-        assert_eq!(sample_plan(None, None), (VMAF_SAMPLES, VMAF_SAMPLE_SECS));
+    fn sample_plan_takes_enough_windows_to_trim_outliers() {
+        // Every tier takes >=4 windows so one bad window can be trimmed; larger
+        // frames use shorter windows to bound cost.
+        assert_eq!(sample_plan(Some(1920), Some(1080)), (4, 12.0));
+        assert_eq!(sample_plan(Some(3840), Some(2160)), (4, 10.0));
+        assert_eq!(sample_plan(Some(7680), Some(4320)), (4, 6.0));
+        assert_eq!(sample_plan(None, None), (4, 12.0));
+    }
+
+    #[test]
+    fn aggregate_trims_one_low_outlier() {
+        // One pathological window is dropped; the rest are averaged.
+        let m = aggregate_vmaf(&[78.0, 96.0, 95.0, 97.0]);
+        assert!((m - 96.0).abs() < 1e-9); // mean of 95, 96, 97
+        // Fewer than four → plain mean (nothing trimmed).
+        assert!((aggregate_vmaf(&[78.0, 96.0]) - 87.0).abs() < 1e-9);
+        assert_eq!(aggregate_vmaf(&[]), 0.0);
     }
 
     #[test]

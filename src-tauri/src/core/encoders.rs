@@ -88,6 +88,15 @@ pub fn candidates(codec: Codec) -> Vec<Encoder> {
     }
 }
 
+/// The software (CPU) encoder for a codec — always available as a last-resort
+/// fallback when a hardware encode fails on an edge-case source (e.g. a VR
+/// resolution the GPU decode/scale path rejects).
+pub fn software_encoder(codec: Codec) -> Option<Encoder> {
+    candidates(codec)
+        .into_iter()
+        .find(|e| e.family == EncoderFamily::Software)
+}
+
 /// Parse `ffmpeg -encoders` into the set of encoder names the build exposes.
 pub fn list_available(ffmpeg: &Path) -> HashSet<String> {
     let mut cmd = command_no_window(ffmpeg);
@@ -271,6 +280,16 @@ mod tests {
             assert!(candidates(codec)
                 .iter()
                 .any(|e| e.family == EncoderFamily::Software));
+        }
+    }
+
+    #[test]
+    fn software_encoder_resolves_per_codec() {
+        assert_eq!(software_encoder(Codec::Av1).unwrap().name, "libsvtav1");
+        assert_eq!(software_encoder(Codec::Hevc).unwrap().name, "libx265");
+        assert_eq!(software_encoder(Codec::H264).unwrap().name, "libx264");
+        for codec in [Codec::Av1, Codec::Hevc, Codec::H264] {
+            assert_eq!(software_encoder(codec).unwrap().family, EncoderFamily::Software);
         }
     }
 }

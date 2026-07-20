@@ -23,6 +23,8 @@ export const defaultConfig = (): RunConfig => ({
   verify_depth: "fast",
   ssim_floor: null,
   vmaf_target: null,
+  vmaf_samples: 0,
+  vmaf_sample_secs: 0,
   skip_dolby_vision: true,
   order: "smart",
   paranoid: false,

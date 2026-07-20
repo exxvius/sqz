@@ -304,6 +304,12 @@ pub struct Config {
     /// behavior. When set, it also auto-relaxes the post-encode `ssim_floor`
     /// (redundant — VMAF already governs quality).
     pub vmaf_target: Option<f64>,
+    /// VMAF search sample count. `0` = auto (chosen from the source resolution).
+    /// More samples = more representative/accurate but slower.
+    pub vmaf_samples: usize,
+    /// VMAF search sample length in seconds. `0` = auto. Longer = more accurate but
+    /// slower.
+    pub vmaf_sample_secs: f64,
     /// Skip Dolby Vision sources rather than risk dropping the DV layer.
     pub skip_dolby_vision: bool,
     /// Processing order for pending files.
@@ -356,6 +362,8 @@ impl Default for Config {
             verify_depth: VerifyDepth::Fast,
             ssim_floor: None,
             vmaf_target: None,
+            vmaf_samples: 0,
+            vmaf_sample_secs: 0.0,
             skip_dolby_vision: true,
             order: Order::Smart,
             paranoid: false,
@@ -447,6 +455,13 @@ impl Config {
             if !(0.0..=100.0).contains(&target) {
                 return Err("vmaf_target must be in [0, 100]".into());
             }
+        }
+        // 0 = auto; otherwise clamp to sane bounds so the search stays tractable.
+        if self.vmaf_samples > 16 {
+            return Err("vmaf_samples must be 0 (auto) or <= 16".into());
+        }
+        if self.vmaf_sample_secs != 0.0 && !(1.0..=120.0).contains(&self.vmaf_sample_secs) {
+            return Err("vmaf_sample_secs must be 0 (auto) or in [1, 120]".into());
         }
         if matches!(self.on_success, OnSuccess::Holding) && self.holding_dir.is_none() {
             return Err("on_success=holding requires holding_dir".into());

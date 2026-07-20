@@ -39,6 +39,10 @@ pub struct AppState {
     /// Resolved FFmpeg binaries; refreshed after a download / path change.
     pub ff: Mutex<FfBin>,
     pub run: Mutex<Option<RunControl>>,
+    /// The last finalized run config. Retained so retry/force can resume a run
+    /// with the same settings when none is active (the workers only exist during a
+    /// run, so re-queuing after one finishes needs a run to pick the file up).
+    pub last_config: Mutex<Option<Config>>,
     /// Cancel tokens for files currently being processed (for per-file abort).
     pub active: ActiveMap,
     /// Cancel token for the in-flight reclaimable-space projection (Tier-2 probe
@@ -59,6 +63,7 @@ impl AppState {
             data_dir,
             ff: Mutex::new(ff),
             run: Mutex::new(None),
+            last_config: Mutex::new(None),
             active: Arc::new(Mutex::new(HashMap::new())),
             projection: Mutex::new(None),
             health: Mutex::new(None),
@@ -567,6 +572,15 @@ fn finalize_config(state: &AppState, mut cfg: Config) -> Result<Config, String> 
 #[tauri::command]
 pub fn start_run(app: AppHandle, config: Config, state: State<'_, AppState>) -> Result<(), String> {
     guard_locked(&state)?;
+    let cfg = finalize_config(&state, config)?;
+    // Remember the settings so retry/force can resume with them when idle.
+    *state.last_config.lock().unwrap() = Some(cfg.clone());
+    launch_run(app, cfg, &state)
+}
+
+/// Spawn the worker run for a finalized config. Rejects if a run is already
+/// active (re-checked here so it's safe to call from retry/force too).
+fn launch_run(app: AppHandle, cfg: Config, state: &AppState) -> Result<(), String> {
     {
         let guard = state.run.lock().unwrap();
         if guard.is_some() {
@@ -574,7 +588,6 @@ pub fn start_run(app: AppHandle, config: Config, state: State<'_, AppState>) -> 
         }
     }
 
-    let cfg = finalize_config(&state, config)?;
     let ff = state.ff();
     if !ff.is_present() {
         return Err("FFmpeg isn't set up yet. Add it from Settings first.".into());
@@ -642,18 +655,61 @@ pub fn abort_file(path: String, state: State<'_, AppState>) -> Result<(), String
     }
 }
 
-/// Re-queue a file for processing (retry). Works while a run is active.
+/// Re-queue a file for processing (retry). If no run is active, resumes one with
+/// the last-used settings so the file actually gets processed.
 #[tauri::command]
-pub async fn retry_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn retry_file(
+    app: AppHandle,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     guard_locked(&state)?;
-    requeue(state.db_path(), path, false).await
+    requeue(state.db_path(), path, false).await?;
+    resume_if_idle(app, &state);
+    Ok(())
 }
 
-/// Re-queue a file, forcing it past the skip/abort checks.
+/// Re-queue a file, forcing it past the skip/abort checks. Resumes an idle run too.
 #[tauri::command]
-pub async fn force_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn force_file(
+    app: AppHandle,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     guard_locked(&state)?;
-    requeue(state.db_path(), path, true).await
+    requeue(state.db_path(), path, true).await?;
+    resume_if_idle(app, &state);
+    Ok(())
+}
+
+/// After a re-queue, start a run so the newly-pending file is actually picked up.
+/// A no-op while a run is live (its workers claim re-queued files). When idle it
+/// resumes with the last-used config, or — for a failed file left over from a
+/// previous session — the persisted settings (or defaults).
+fn resume_if_idle(app: AppHandle, state: &AppState) {
+    let cfg = {
+        if state.run.lock().unwrap().is_some() {
+            return;
+        }
+        state.last_config.lock().unwrap().clone()
+    };
+    let cfg = cfg.or_else(|| persisted_config(state));
+    if let Some(cfg) = cfg {
+        // Best-effort: launch_run re-checks the run slot, so a race just no-ops.
+        let _ = launch_run(app, cfg, state);
+    }
+}
+
+/// Reconstruct a finalized run config from the persisted settings (or defaults if
+/// none), so retry works even for a failed file carried over from a past session
+/// before any run started. Inputs are empty — the run processes all pending rows
+/// regardless, so the re-queued file is still picked up.
+fn persisted_config(state: &AppState) -> Option<Config> {
+    let cfg = std::fs::read_to_string(state.settings_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<Config>(&s).ok())
+        .unwrap_or_default();
+    finalize_config(state, cfg).ok()
 }
 
 async fn requeue(db: PathBuf, path: String, force: bool) -> Result<(), String> {

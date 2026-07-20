@@ -1,6 +1,25 @@
 import { useState, type CSSProperties } from "react";
 import type { Codec, QualityPreset } from "../lib/types";
 import { Switch } from "./atoms";
+import { Select } from "./Select";
+
+/** VMAF sampling speed/accuracy controls (0 = auto). */
+const SAMPLE_OPTS = [
+  { value: "0", label: "Auto samples" },
+  { value: "2", label: "2 samples (fastest)" },
+  { value: "3", label: "3 samples" },
+  { value: "4", label: "4 samples" },
+  { value: "6", label: "6 samples" },
+  { value: "8", label: "8 samples (most accurate)" },
+];
+const LENGTH_OPTS = [
+  { value: "0", label: "Auto length" },
+  { value: "6", label: "6s clips" },
+  { value: "8", label: "8s clips" },
+  { value: "10", label: "10s clips" },
+  { value: "15", label: "15s clips" },
+  { value: "20", label: "20s clips" },
+];
 
 const PRESETS: { id: QualityPreset; name: string; desc: string }[] = [
   { id: "max-savings", name: "Maximum savings", desc: "Smallest files. Great for archives." },
@@ -28,18 +47,26 @@ interface Props {
   codec: Codec;
   quality: QualityPreset;
   vmafTarget: number | null;
+  vmafSamples: number;
+  vmafSampleSecs: number;
   onCodec: (c: Codec) => void;
   onQuality: (q: QualityPreset) => void;
   onVmafTarget: (t: number | null) => void;
+  onVmafSamples: (n: number) => void;
+  onVmafSampleSecs: (n: number) => void;
 }
 
 export function QualityPresets({
   codec,
   quality,
   vmafTarget,
+  vmafSamples,
+  vmafSampleSecs,
   onCodec,
   onQuality,
   onVmafTarget,
+  onVmafSamples,
+  onVmafSampleSecs,
 }: Props) {
   const vmafOn = vmafTarget != null;
   // Cursor position over the slider (0–1), for dock-style tick magnification.
@@ -149,6 +176,30 @@ export function QualityPresets({
             <div className="muted vmaf-hint">
               95 is near-transparent. Higher targets keep more quality but reclaim less; the
               per-title search picks the CRF that hits it.
+            </div>
+
+            <div className="field vmaf-sampling">
+              <label>
+                Sampling
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  More / longer samples judge the whole title better but slow the search. Auto
+                  scales to the source resolution.
+                </div>
+              </label>
+              <div className="row" style={{ gap: "var(--space-2)" }}>
+                <Select
+                  ariaLabel="VMAF sample count"
+                  value={String(vmafSamples)}
+                  options={SAMPLE_OPTS}
+                  onChange={(v) => onVmafSamples(Number(v))}
+                />
+                <Select
+                  ariaLabel="VMAF sample length"
+                  value={String(vmafSampleSecs)}
+                  options={LENGTH_OPTS}
+                  onChange={(v) => onVmafSampleSecs(Number(v))}
+                />
+              </div>
             </div>
           </div>
         )}

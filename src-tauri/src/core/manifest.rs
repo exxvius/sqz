@@ -22,6 +22,14 @@ pub const STATUS_FAILED: &str = "failed";
 /// query never picks it up, so scanning a library never encodes anything.
 pub const STATUS_INDEXED: &str = "indexed";
 
+/// Tolerance (seconds) for comparing a file's stored vs current mtime. Some
+/// filesystems (FAT/exFAT, many network/USB shares — common for large VR
+/// libraries) report modification times at coarse (up to 2s) or slightly-varying
+/// resolution, so an exact match spuriously treats an unchanged file as changed —
+/// which both re-queues it for a full re-encode and misses the cached VMAF CRF. A
+/// couple of seconds cleanly separates a real edit from timestamp jitter.
+const MTIME_TOL_SECS: f64 = 2.0;
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS files (
     path              TEXT PRIMARY KEY,
@@ -40,7 +48,8 @@ CREATE TABLE IF NOT EXISTS files (
     health_detail     TEXT,
     health_checked_at REAL,
     vmaf_crf          INTEGER,
-    vmaf_target       REAL
+    vmaf_target       REAL,
+    fallback          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -56,6 +65,9 @@ pub struct StatusUpdate {
     pub error: Option<String>,
     /// Wall-clock encode time in milliseconds (only set on a real re-encode).
     pub encode_ms: Option<i64>,
+    /// Diagnostic note when the encode succeeded only after falling back from the
+    /// preferred pipeline (carries the reason). `None` clears any prior note.
+    pub fallback: Option<String>,
 }
 
 /// One raw history aggregate per `(codec, height)` group:
@@ -73,6 +85,8 @@ pub struct HistoryRow {
     pub out_size: Option<u64>,
     pub saved_bytes: Option<i64>,
     pub error: Option<String>,
+    /// Note when the encode succeeded only via a pipeline fallback (with reason).
+    pub fallback: Option<String>,
     pub updated_at: Option<f64>,
 }
 
@@ -139,6 +153,9 @@ impl Manifest {
         // target it was resolved for (a different target invalidates the cache).
         let _ = conn.execute("ALTER TABLE files ADD COLUMN vmaf_crf INTEGER", []);
         let _ = conn.execute("ALTER TABLE files ADD COLUMN vmaf_target REAL", []);
+        // A diagnostic note when a file succeeded only after falling back from the
+        // preferred (GPU-resident) encode pipeline — carries the ffmpeg reason.
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN fallback TEXT", []);
         // The "warning" (playback-caveat) health verdict was dropped; those files
         // probed fine, so fold any legacy rows back into "healthy".
         let _ = conn.execute(
@@ -178,7 +195,8 @@ impl Manifest {
                 )?;
             }
             Some((old_size, old_mtime, status)) => {
-                let changed = old_size != size as i64 || (old_mtime - mtime).abs() > f64::EPSILON;
+                let changed =
+                    old_size != size as i64 || (old_mtime - mtime).abs() > MTIME_TOL_SECS;
                 let failed_retry = retry_failed && status == STATUS_FAILED;
                 // An `indexed` row is a library-only entry (health-scanned, never
                 // queued). When a run discovers it, promote it to `pending` so a
@@ -201,7 +219,7 @@ impl Manifest {
         conn.execute(
             "UPDATE files SET status=?1, src_codec=COALESCE(?2, src_codec), \
              height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, \
-             encode_ms=COALESCE(?7, encode_ms), updated_at=?8 WHERE path=?9",
+             encode_ms=COALESCE(?7, encode_ms), fallback=?8, updated_at=?9 WHERE path=?10",
             params![
                 status,
                 upd.src_codec,
@@ -210,6 +228,7 @@ impl Manifest {
                 upd.saved_bytes,
                 upd.error,
                 upd.encode_ms,
+                upd.fallback,
                 now(),
                 path,
             ],
@@ -393,8 +412,8 @@ impl Manifest {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, updated_at \
-             FROM files",
+            "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, \
+             fallback, updated_at FROM files",
         );
         // History is the pipeline ledger — library-only (indexed) rows that were
         // merely health-scanned, never processed, don't belong here.
@@ -472,10 +491,10 @@ impl Manifest {
             )
             .ok();
         let (old_size, old_mtime, crf, tgt) = row?;
-        let unchanged = old_size == size as i64 && (old_mtime - mtime).abs() <= f64::EPSILON;
-        let same_target = tgt
-            .map(|t| (t - target).abs() <= f64::EPSILON)
-            .unwrap_or(false);
+        let unchanged = old_size == size as i64 && (old_mtime - mtime).abs() <= MTIME_TOL_SECS;
+        // Targets are whole numbers ≥1 apart, so half a unit cleanly separates them
+        // while tolerating any float round-trip.
+        let same_target = tgt.map(|t| (t - target).abs() < 0.5).unwrap_or(false);
         if unchanged && same_target {
             crf.map(|c| c as i32)
         } else {
@@ -661,7 +680,8 @@ fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
         out_size: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         saved_bytes: r.get(6)?,
         error: r.get(7)?,
-        updated_at: r.get(8)?,
+        fallback: r.get(8)?,
+        updated_at: r.get(9)?,
     })
 }
 
@@ -741,11 +761,41 @@ mod tests {
         assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 1.0, 95.0), Some(32));
         // A different target invalidates.
         assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 1.0, 97.0), None);
-        // A changed file (size or mtime) invalidates.
+        // A changed file (size, or mtime beyond tolerance) invalidates.
         assert_eq!(m.cached_vmaf_crf("/a.mkv", 101, 1.0, 95.0), None);
-        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 2.0, 95.0), None);
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 10.0, 95.0), None);
+        // Sub-tolerance mtime jitter (coarse/varying filesystem clocks) still hits.
+        assert_eq!(m.cached_vmaf_crf("/a.mkv", 100, 2.5, 95.0), Some(32));
         // Unknown path is a miss, not an error.
         assert_eq!(m.cached_vmaf_crf("/nope.mkv", 100, 1.0, 95.0), None);
+    }
+
+    #[test]
+    fn fallback_note_round_trips_through_history() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        m.set_status(
+            "/a.mkv",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_size: Some(40),
+                saved_bytes: Some(60),
+                fallback: Some("Fell back to software encoder libsvtav1.".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let rows = m.history(&HistoryQuery::default()).unwrap();
+        let row = rows.iter().find(|r| r.path == "/a.mkv").unwrap();
+        assert_eq!(
+            row.fallback.as_deref(),
+            Some("Fell back to software encoder libsvtav1.")
+        );
+        // A clean encode (no fallback) leaves the note null.
+        m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
+            .unwrap();
+        let rows = m.history(&HistoryQuery::default()).unwrap();
+        assert!(rows.iter().find(|r| r.path == "/a.mkv").unwrap().fallback.is_none());
     }
 
     #[test]

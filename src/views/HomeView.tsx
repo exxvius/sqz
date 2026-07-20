@@ -244,9 +244,13 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
         codec={config.codec}
         quality={config.quality}
         vmafTarget={config.vmaf_target ?? null}
+        vmafSamples={config.vmaf_samples}
+        vmafSampleSecs={config.vmaf_sample_secs}
         onCodec={(codec) => patch({ codec, encoder_override: null })}
         onQuality={(quality) => patch({ quality })}
         onVmafTarget={(vmaf_target) => patch({ vmaf_target })}
+        onVmafSamples={(vmaf_samples) => patch({ vmaf_samples })}
+        onVmafSampleSecs={(vmaf_sample_secs) => patch({ vmaf_sample_secs })}
       />
 
       <EncoderPanel

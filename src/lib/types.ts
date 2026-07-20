@@ -112,6 +112,10 @@ export interface RunConfig {
   /** VMAF quality mode: target a perceptual quality (0–100) instead of a fixed
    *  CRF. `null` = off (preset mode). */
   vmaf_target?: number | null;
+  /** VMAF search sample count; 0 = auto (from resolution). Higher = slower/accurate. */
+  vmaf_samples: number;
+  /** VMAF search sample length in seconds; 0 = auto. Longer = slower/accurate. */
+  vmaf_sample_secs: number;
   skip_dolby_vision: boolean;
   order: Order;
   paranoid: boolean;
@@ -224,6 +228,8 @@ export interface HistoryRow {
   out_size: number | null;
   saved_bytes: number | null;
   error: string | null;
+  /** Note when the encode succeeded only via a pipeline fallback (with reason). */
+  fallback: string | null;
   updated_at: number | null;
 }
 

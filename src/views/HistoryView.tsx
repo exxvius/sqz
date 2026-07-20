@@ -345,6 +345,7 @@ export function HistoryView() {
                 </dl>
 
                 {r.status === "failed" && r.error && <div className="err-box">{r.error}</div>}
+                {r.fallback && <div className="note-box">⚠ {r.fallback}</div>}
               </StatusCard>
             );
           })

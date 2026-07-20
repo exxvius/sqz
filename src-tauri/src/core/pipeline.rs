@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::abort::{AbortConfig, AbortJudge, AbortProjection};
 use super::config::Config;
-use super::encode::{build_args_q, build_remux_args, run_encode, ProgressSample};
+use super::encode::{build_args_q, build_remux_args, run_encode, EncodeResult, ProgressSample};
 use super::encoders::Encoder;
 use super::estimate::{predict_skip, SkipKind};
 use super::ffbin::FfBin;
@@ -30,6 +30,15 @@ fn cleanup(path: &Path) {
     if path.exists() {
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// Last `n` chars of an ffmpeg stderr tail, newlines flattened — a compact excerpt
+/// for a status message or fallback note.
+fn tail_excerpt(tail: &str, n: usize) -> String {
+    let flat = tail.replace('\n', " ");
+    let flat = flat.trim();
+    let skip = flat.chars().count().saturating_sub(n);
+    flat.chars().skip(skip).collect::<String>().trim().to_string()
 }
 
 fn set(manifest: &Manifest, path: &str, outcome: Outcome, upd: StatusUpdate) {
@@ -149,6 +158,9 @@ fn try_remux(
 /// value. VMAF mode returns a cached per-title CRF when the file is unchanged,
 /// else runs the sample-encode search, caches the result, and reports it. A
 /// failed/cancelled search falls back to the preset quality — never a hard error.
+///
+/// Returns the CRF plus an optional note to attach to the file if it later
+/// succeeds (e.g. the VMAF target was unreachable and the preset was used).
 #[allow(clippy::too_many_arguments)]
 fn resolve_quality(
     ff: &FfBin,
@@ -161,9 +173,9 @@ fn resolve_quality(
     path_str: &str,
     cancel: &(dyn Fn() -> bool + Sync),
     reporter: &dyn Reporter,
-) -> i32 {
+) -> (i32, Option<String>) {
     let Some(target) = cfg.vmaf_target else {
-        return cfg.resolved_quality();
+        return (cfg.resolved_quality(), None);
     };
     let mtime = std::fs::metadata(Path::new(path_str))
         .map(|m| mtime_secs(&m))
@@ -171,16 +183,31 @@ fn resolve_quality(
 
     if let Some(crf) = manifest.cached_vmaf_crf(path_str, size, mtime, target) {
         reporter.on_quality_resolved(path_str, target, crf, None);
-        return crf;
+        return (crf, None);
     }
     let on_search = |frac: f64| reporter.on_search_progress(path_str, frac);
     match super::vmaf::resolve_crf(ff, cfg, encoder, info, target, temp_dir, cancel, &on_search) {
-        Some(r) => {
+        // Target reached: use and cache the searched CRF.
+        Some(r) if r.met_target => {
             let _ = manifest.set_vmaf_crf(path_str, r.crf, target);
             reporter.on_quality_resolved(path_str, target, r.crf, Some(r.vmaf));
-            r.crf
+            (r.crf, None)
         }
-        None => cfg.resolved_quality(),
+        // Target unreachable even at best quality — the searched CRF would be
+        // near-lossless (often bigger than the source, then early-aborted for no
+        // gain). Use the preset quality instead so the file still shrinks sensibly.
+        Some(r) => {
+            let preset = cfg.resolved_quality();
+            let _ = manifest.set_vmaf_crf(path_str, preset, target);
+            reporter.on_quality_resolved(path_str, target, preset, Some(r.vmaf));
+            let note = format!(
+                "VMAF {target:.0} unreachable for this source (best ~{:.1} at CRF {}); \
+                 encoded at the preset quality (CRF {preset}) instead of bloating the file.",
+                r.vmaf, r.crf
+            );
+            (preset, Some(note))
+        }
+        None => (cfg.resolved_quality(), None),
     }
 }
 
@@ -357,7 +384,7 @@ pub fn process_file(
     // Resolve the target quality for this file. Preset mode returns the fixed
     // value instantly; VMAF mode searches (or reuses a cached CRF) for the
     // smallest file that still hits the perceptual target, then reports the choice.
-    let quality = resolve_quality(
+    let (quality, quality_note) = resolve_quality(
         ff, cfg, encoder, manifest, &info, size, &temp_dir, path_str, &cancelled, reporter,
     );
     // A VMAF search can be aborted mid-flight; if so, don't start the real encode.
@@ -365,22 +392,72 @@ pub fn process_file(
         reporter.on_file_end(path_str);
         return ProcessResult::new(path_str, Outcome::Cancelled);
     }
-    let args = build_args_q(cfg, &info, encoder, &ff.caps, &out, quality);
+    // Run one encode with a given config + encoder — its own fresh early-abort
+    // judge and progress sink, so it can be retried cleanly for the fallback tiers.
+    let attempt = |c: &Config, enc: &Encoder| -> EncodeResult {
+        let args = build_args_q(c, &info, enc, &ff.caps, &out, quality);
+        let judge = Mutex::new(AbortJudge::new(AbortConfig::from(c, info.duration, size)));
+        let abort_pred =
+            |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
+        let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
+        run_encode(&ff.ffmpeg, &args, &cancelled, &mut on_progress, Some(&abort_pred))
+    };
+    // A real encode failure (non-zero, and not a cancel or an intentional early
+    // abort). An `aborted` result is "no gain", not a failure — never retried.
+    let failed = |e: &EncodeResult| e.returncode != Some(0) && !e.cancelled && !e.aborted;
 
-    // Staged early-abort judge, driven by ffmpeg progress ticks.
-    let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));
-    let abort_pred =
-        |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
-
-    let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
     let encode_start = std::time::Instant::now();
-    let enc = run_encode(
-        &ff.ffmpeg,
-        &args,
-        &cancelled,
-        &mut on_progress,
-        Some(&abort_pred),
-    );
+    let mut enc = attempt(cfg, encoder);
+    // Capture *why* the preferred (tier-1) pipeline failed before any retry — so if
+    // a fallback then succeeds, the reason isn't lost (the file won't fail).
+    let preferred_err = failed(&enc).then(|| tail_excerpt(&enc.stderr_tail, 300));
+    let mut fallback_stage: Option<String> = None;
+
+    // Tier 2 — a hardware encode that fails with no output on an edge-case source
+    // (e.g. some VR geometries the GPU decode/scale path rejects) almost always
+    // failed in the *CUDA decode/scale*, not the encoder itself. Keep the fast
+    // hardware encoder but drop to software decode + software scale, which is the
+    // compatible path. This is what stops GPU encodes from falling all the way to
+    // slow software for what is really a decode/scale quirk.
+    if failed(&enc) && encoder.family.is_hardware() && cfg.hardware_decode {
+        cleanup(&out);
+        tracing::warn!(
+            encoder = %encoder.name,
+            "GPU-resident encode failed; retrying with software decode + hardware encode"
+        );
+        let sw_decode = Config { hardware_decode: false, ..cfg.clone() };
+        enc = attempt(&sw_decode, encoder);
+        fallback_stage = Some(format!("software decode + {} (hardware) encode", encoder.name));
+    }
+    // Tier 3 — the hardware encoder itself can't handle this source; last resort is
+    // the software encoder (which also takes the all-software decode/scale path).
+    if failed(&enc) && encoder.family.is_hardware() {
+        if let Some(sw) = super::encoders::software_encoder(cfg.codec) {
+            if sw.name != encoder.name {
+                cleanup(&out);
+                tracing::warn!(
+                    encoder = %encoder.name,
+                    fallback = %sw.name,
+                    "hardware encode still failing; retrying with software encoder"
+                );
+                enc = attempt(cfg, &sw);
+                fallback_stage = Some(format!("software encoder {}", sw.name));
+            }
+        }
+    }
+    // The note attached to the file if it ultimately succeeds. Combines a VMAF
+    // "target unreachable → used preset" note with any encode-pipeline fallback.
+    let encode_note = match (&fallback_stage, &preferred_err) {
+        (Some(stage), Some(err)) => {
+            Some(format!("Fell back to {stage}. Preferred (GPU) pipeline failed — {err}"))
+        }
+        (Some(stage), None) => Some(format!("Fell back to {stage}.")),
+        _ => None,
+    };
+    let fallback_note = match (quality_note, encode_note) {
+        (Some(q), Some(e)) => Some(format!("{q} {e}")),
+        (q, e) => q.or(e),
+    };
     let encode_ms = encode_start.elapsed().as_millis() as i64;
     reporter.on_file_end(path_str);
 
@@ -424,34 +501,20 @@ pub fn process_file(
     if enc.returncode != Some(0) {
         cleanup(&out);
         let rc = enc.returncode.unwrap_or(-1);
-        let tail: String = enc.stderr_tail.replace('\n', " ");
-        let tail_trim: String = tail
-            .chars()
-            .rev()
-            .take(400)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
+        // Log the full ffmpeg tail so the actual encoder error (e.g. the specific
+        // NVENC reason) is recoverable — the manifest only keeps a short excerpt.
+        tracing::warn!(path = %path_str, rc, "encode failed after fallbacks:\n{}", enc.stderr_tail);
         set(
             manifest,
             path_str,
             Outcome::Failed,
             StatusUpdate {
-                error: Some(format!("ffmpeg rc={rc}: {tail_trim}")),
+                error: Some(format!("ffmpeg rc={rc}: {}", tail_excerpt(&enc.stderr_tail, 400))),
                 ..meta_upd(&info)
             },
         );
-        let short: String = tail
-            .chars()
-            .rev()
-            .take(160)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
         return ProcessResult::new(path_str, Outcome::Failed)
-            .with_message(format!("ffmpeg rc={rc}: {short}"));
+            .with_message(format!("ffmpeg rc={rc}: {}", tail_excerpt(&enc.stderr_tail, 160)));
     }
 
     let vr = verify_output(&ff.ffmpeg, &ff.ffprobe, cfg, &info, &out);
@@ -517,6 +580,7 @@ pub fn process_file(
             out_size: Some(vr.out_size),
             saved_bytes: Some(saved),
             encode_ms: Some(encode_ms),
+            fallback: fallback_note,
             ..meta_upd(&info)
         },
     );
