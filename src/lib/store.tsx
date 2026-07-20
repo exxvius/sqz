@@ -41,6 +41,10 @@ export interface ActiveFile {
   /** VMAF sample-search progress (0–1) before the real encode; null when not
    *  searching (preset mode, or once the encode has started). */
   searchFrac: number | null;
+  /** Wall-clock ms when the search started (first progress tick). */
+  searchStartedAt: number | null;
+  /** Smoothed estimated seconds remaining for the search, or null until stable. */
+  searchEta: number | null;
 }
 
 export interface LogEntry {
@@ -160,6 +164,8 @@ function reducer(state: State, action: Action): State {
             projections: [],
             qualityNote: null,
             searchFrac: null,
+            searchStartedAt: null,
+            searchEta: null,
           },
         },
       };
@@ -188,6 +194,7 @@ function reducer(state: State, action: Action): State {
             projections,
             // A real encode tick means the search is over; hand the bar back.
             searchFrac: null,
+            searchEta: null,
           },
         },
       };
@@ -195,13 +202,26 @@ function reducer(state: State, action: Action): State {
     case "QUALITY_PROGRESS": {
       const f = state.active[action.p.path];
       if (!f) return state;
-      const { done, total } = action.p;
       // Hold just under 1 so the bar reads as "still working" until the encode
       // takes over — it never implies the search is 100% done.
-      const frac = total > 0 ? Math.min(done / total, 0.99) : 0;
+      const frac = Math.min(action.p.frac, 0.99);
+      const now = Date.now();
+      const startedAt = f.searchStartedAt ?? now;
+      const elapsed = (now - startedAt) / 1000;
+      // ETA from the observed rate of progress (work is ~uniform per fraction).
+      // Only trust it once there's a little signal, and smooth it (EMA) so it
+      // doesn't jitter frame-to-frame.
+      let eta = f.searchEta;
+      if (frac > 0.06 && elapsed > 3) {
+        const raw = (elapsed * (1 - frac)) / frac;
+        eta = f.searchEta == null ? raw : f.searchEta * 0.6 + raw * 0.4;
+      }
       return {
         ...state,
-        active: { ...state.active, [action.p.path]: { ...f, searchFrac: frac } },
+        active: {
+          ...state.active,
+          [action.p.path]: { ...f, searchFrac: frac, searchStartedAt: startedAt, searchEta: eta },
+        },
       };
     }
     case "QUALITY_RESOLVED": {
@@ -217,7 +237,7 @@ function reducer(state: State, action: Action): State {
         ...state,
         active: {
           ...state.active,
-          [action.p.path]: { ...f, qualityNote: note, searchFrac: null },
+          [action.p.path]: { ...f, qualityNote: note, searchFrac: null, searchEta: null },
         },
       };
     }

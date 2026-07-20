@@ -57,8 +57,8 @@ pub struct FileEnd {
 #[derive(Debug, Clone, Serialize)]
 pub struct QualityProgress {
     pub path: String,
-    pub done: u32,
-    pub total: u32,
+    /// Search progress, 0.0–1.0.
+    pub frac: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,13 +113,12 @@ impl Reporter for TauriReporter {
         );
     }
 
-    fn on_search_progress(&self, path: &str, done: u32, total: u32) {
+    fn on_search_progress(&self, path: &str, frac: f64) {
         let _ = self.app.emit(
             EV_QUALITY_PROGRESS,
             QualityProgress {
                 path: path.to_string(),
-                done,
-                total,
+                frac,
             },
         );
     }

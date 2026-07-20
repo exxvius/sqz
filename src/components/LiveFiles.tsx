@@ -75,18 +75,19 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
             </div>
 
             {searching ? (
-              <div className="live-quality searching">
+              <div className="live-quality">
                 Finding best quality… {pct(f.searchFrac ?? 0)}
+                {f.searchEta != null && ` · ~${fmtDuration(f.searchEta)} left`}
               </div>
             ) : (
               f.qualityNote && <div className="live-quality">{f.qualityNote}</div>
             )}
 
             <div
-              className={`bar tall${searching ? " searching" : ""}`}
+              className="bar tall"
               style={{ "--p": searching ? (f.searchFrac ?? 0) : d.progress } as CSSProperties}
             >
-              <span className={searching ? "search" : d.klass} />
+              <span className={searching ? "" : d.klass} />
             </div>
 
             {searching ? null : (

@@ -867,13 +867,6 @@
   --bar-c: var(--bad);
   --bar-c2: oklch(62% 0.19 25);
 }
-/* VMAF sample-search phase (before the real encode): fills as each sample
-   completes, in a cooler hue so it reads as distinct from the encode itself. The
-   base fill's flowing shimmer keeps it visibly active between sample steps. */
-.bar.searching:has(> span.search) {
-  --bar-c: oklch(72% 0.12 250);
-  --bar-c2: oklch(80% 0.1 265);
-}
 .bar > span {
   position: relative;
   display: block;
@@ -1516,10 +1509,6 @@
   font-variant-numeric: tabular-nums;
   color: var(--accent);
   letter-spacing: 0.02em;
-}
-/* The pre-encode search label uses the same cooler hue as its bar. */
-.live-quality.searching {
-  color: oklch(72% 0.12 250);
 }
 .live-abort {
   border: 1px solid var(--glass-border);

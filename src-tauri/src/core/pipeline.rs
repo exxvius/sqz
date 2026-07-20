@@ -173,7 +173,7 @@ fn resolve_quality(
         reporter.on_quality_resolved(path_str, target, crf, None);
         return crf;
     }
-    let on_search = |done: u32, total: u32| reporter.on_search_progress(path_str, done, total);
+    let on_search = |frac: f64| reporter.on_search_progress(path_str, frac);
     match super::vmaf::resolve_crf(ff, cfg, encoder, info, target, temp_dir, cancel, &on_search) {
         Some(r) => {
             let _ = manifest.set_vmaf_crf(path_str, r.crf, target);
@@ -360,6 +360,11 @@ pub fn process_file(
     let quality = resolve_quality(
         ff, cfg, encoder, manifest, &info, size, &temp_dir, path_str, &cancelled, reporter,
     );
+    // A VMAF search can be aborted mid-flight; if so, don't start the real encode.
+    if cancelled() {
+        reporter.on_file_end(path_str);
+        return ProcessResult::new(path_str, Outcome::Cancelled);
+    }
     let args = build_args_q(cfg, &info, encoder, &ff.caps, &out, quality);
 
     // Staged early-abort judge, driven by ffmpeg progress ticks.

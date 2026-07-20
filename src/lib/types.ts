@@ -266,8 +266,8 @@ export interface FileEnd {
 /** Progress through the VMAF sample-encode search for a file (before its encode). */
 export interface QualityProgress {
   path: string;
-  done: number;
-  total: number;
+  /** Search progress, 0–1. */
+  frac: number;
 }
 /** VMAF mode resolved a per-title CRF for a file (before its full encode). */
 export interface QualityResolved {
