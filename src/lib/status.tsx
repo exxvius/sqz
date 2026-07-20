@@ -37,6 +37,8 @@ export function outcomeMeta(o: Outcome): StatusMeta {
       return { label: "Lean — skipped", sym: <LeanIcon />, tone: "muted" };
     case "skipped_no_gain":
       return { label: "No gain — kept", sym: <NoGainIcon />, tone: "warn" };
+    case "skipped_unhealthy":
+      return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "cancelled":
@@ -58,6 +60,8 @@ export function statusMeta(s: Status): StatusMeta {
       return { label: "Lean — skipped", sym: <LeanIcon />, tone: "muted" };
     case "skipped_no_gain":
       return { label: "No gain — kept", sym: <NoGainIcon />, tone: "warn" };
+    case "skipped_unhealthy":
+      return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "processing":

@@ -142,7 +142,10 @@ pub enum AudioMode {
 
 /// How deeply to verify an output before trusting it enough to replace the
 /// original. Stricter costs more time but closes more silent-corruption paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Declaration order is significant: `Ord` ranks `Fast < Thorough < Checksummed`,
+/// so [`Config::effective_verify_depth`] can raise a depth with `.max(..)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VerifyDepth {
     /// Decode the first and last few seconds of video.
@@ -151,6 +154,19 @@ pub enum VerifyDepth {
     Thorough,
     /// Fully decode every stream (video + audio) and hash it.
     Checksummed,
+}
+
+/// Pre-encode source health gate. `Off` keeps the legacy behavior (a probe
+/// failure is a plain failure, no health recorded). `Structural` classifies and
+/// records health and skips unreadable sources — near-free, it's the `probe()`
+/// the pipeline already runs. `Deep` additionally decode-probes the source to
+/// catch silent corruption before spending an encode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthGate {
+    Off,
+    Structural,
+    Deep,
 }
 
 /// Output bit depth.
@@ -295,6 +311,9 @@ pub struct Config {
     pub audio_bitrate_kbps: u32,
     /// Verification depth. `paranoid` (legacy) forces at least `Thorough`.
     pub verify_depth: VerifyDepth,
+    /// Health-check each source before encoding it (and skip/flag the bad ones).
+    /// Defaults to `Structural`; `Deep` also decode-probes the source.
+    pub health_gate: HealthGate,
     /// Optional minimum SSIM (0..1) the output must reach vs the source, else the
     /// original is kept. `None` disables the perceptual-quality gate.
     pub ssim_floor: Option<f64>,
@@ -360,6 +379,7 @@ impl Default for Config {
             audio_mode: AudioMode::Copy,
             audio_bitrate_kbps: DEFAULT_AUDIO_KBPS,
             verify_depth: VerifyDepth::Fast,
+            health_gate: HealthGate::Structural,
             ssim_floor: None,
             vmaf_target: None,
             vmaf_samples: 0,
@@ -413,6 +433,17 @@ impl Config {
         match (self.paranoid, self.verify_depth) {
             (true, VerifyDepth::Fast) => VerifyDepth::Thorough,
             (_, depth) => depth,
+        }
+    }
+
+    /// Depth used to verify an *encoded output* before it can replace the
+    /// original. When the source health gate is `Deep`, the output is verified at
+    /// least as deeply as the source (`Fast`), so both ends of the swap get the
+    /// same scrutiny. Otherwise the resolved depth stands.
+    pub fn effective_verify_depth(&self) -> VerifyDepth {
+        match self.health_gate {
+            HealthGate::Deep => self.resolved_verify_depth().max(VerifyDepth::Fast),
+            _ => self.resolved_verify_depth(),
         }
     }
 
@@ -542,6 +573,46 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(cfg.resolved_verify_depth(), VerifyDepth::Fast);
+    }
+
+    #[test]
+    fn health_gate_defaults_to_structural() {
+        assert_eq!(Config::default().health_gate, HealthGate::Structural);
+    }
+
+    #[test]
+    fn deep_gate_raises_output_verify_to_at_least_fast() {
+        let cfg = Config {
+            health_gate: HealthGate::Deep,
+            verify_depth: VerifyDepth::Fast,
+            ..Config::default()
+        };
+        assert_eq!(cfg.effective_verify_depth(), VerifyDepth::Fast);
+        // A stronger explicit depth is left untouched — never lowered.
+        let cfg = Config {
+            health_gate: HealthGate::Deep,
+            verify_depth: VerifyDepth::Checksummed,
+            ..Config::default()
+        };
+        assert_eq!(cfg.effective_verify_depth(), VerifyDepth::Checksummed);
+    }
+
+    #[test]
+    fn non_deep_gate_preserves_the_resolved_depth() {
+        for gate in [HealthGate::Off, HealthGate::Structural] {
+            let cfg = Config {
+                health_gate: gate,
+                verify_depth: VerifyDepth::Fast,
+                ..Config::default()
+            };
+            assert_eq!(cfg.effective_verify_depth(), VerifyDepth::Fast);
+        }
+    }
+
+    #[test]
+    fn verify_depth_orders_fast_below_checksummed() {
+        assert!(VerifyDepth::Fast < VerifyDepth::Thorough);
+        assert!(VerifyDepth::Thorough < VerifyDepth::Checksummed);
     }
 
     #[test]

@@ -42,6 +42,9 @@ pub enum Outcome {
     SkippedEfficient,
     SkippedMarginal,
     SkippedNoGain,
+    /// The pre-encode health gate rejected the source (unreadable/corrupt) — a
+    /// deliberate skip, not an encode failure. Terminal, never re-encoded on resume.
+    SkippedUnhealthy,
     Failed,
     Cancelled,
     DryRun,
@@ -58,6 +61,7 @@ impl Outcome {
             Outcome::SkippedEfficient => Some(STATUS_SKIPPED_EFFICIENT),
             Outcome::SkippedMarginal => Some(STATUS_SKIPPED_MARGINAL),
             Outcome::SkippedNoGain => Some(STATUS_SKIPPED_NO_GAIN),
+            Outcome::SkippedUnhealthy => Some(STATUS_SKIPPED_UNHEALTHY),
             Outcome::Failed => Some(STATUS_FAILED),
             Outcome::Cancelled | Outcome::DryRun => None,
         }
@@ -84,6 +88,31 @@ pub trait Reporter: Send + Sync {
     fn on_file_end(&self, path: &str);
     /// A file reached a terminal outcome (append to the event log / stats).
     fn on_record(&self, result: &ProcessResult);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::manifest::STATUS_SKIPPED_UNHEALTHY;
+
+    #[test]
+    fn skipped_unhealthy_persists_as_its_own_status() {
+        assert_eq!(
+            Outcome::SkippedUnhealthy.manifest_status(),
+            Some(STATUS_SKIPPED_UNHEALTHY)
+        );
+        // It must be distinct from a plain failure.
+        assert_ne!(
+            Outcome::SkippedUnhealthy.manifest_status(),
+            Outcome::Failed.manifest_status()
+        );
+    }
+
+    #[test]
+    fn skipped_unhealthy_serializes_snake_case() {
+        let json = serde_json::to_string(&Outcome::SkippedUnhealthy).unwrap();
+        assert_eq!(json, "\"skipped_unhealthy\"");
+    }
 }
 
 /// A reporter that discards everything (tests, headless batch runs).

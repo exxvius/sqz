@@ -119,8 +119,10 @@ pub fn verify_output(
         );
     }
 
-    // 3) Decodes without errors (depth per `verify_depth`).
-    let (ok, detail) = decode_probe(ffmpeg, out_path, cfg.resolved_verify_depth());
+    // 3) Decodes without errors. Depth is `effective_verify_depth` so a Deep
+    // source health gate verifies the output at least as deeply as the source —
+    // both ends of the swap get the same scrutiny.
+    let (ok, detail) = decode_probe(ffmpeg, out_path, cfg.effective_verify_depth());
     if !ok {
         return VerifyResult::bad(VerifyReason::DecodeError, out_size, detail);
     }

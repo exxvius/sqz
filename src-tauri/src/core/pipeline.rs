@@ -6,11 +6,13 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use super::abort::{AbortConfig, AbortJudge, AbortProjection};
-use super::config::Config;
+use super::config::{Config, HealthGate, VerifyDepth};
+use super::decode::decode_probe;
 use super::encode::{build_args_q, build_remux_args, run_encode, EncodeResult, ProgressSample};
 use super::encoders::Encoder;
 use super::estimate::{predict_skip, SkipKind};
 use super::ffbin::FfBin;
+use super::health::HealthState;
 use super::manifest::{mtime_secs, Manifest, StatusUpdate};
 use super::paths::temp_dir_for;
 use super::probe::{probe, MediaInfo};
@@ -38,7 +40,11 @@ fn tail_excerpt(tail: &str, n: usize) -> String {
     let flat = tail.replace('\n', " ");
     let flat = flat.trim();
     let skip = flat.chars().count().saturating_sub(n);
-    flat.chars().skip(skip).collect::<String>().trim().to_string()
+    flat.chars()
+        .skip(skip)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn set(manifest: &Manifest, path: &str, outcome: Outcome, upd: StatusUpdate) {
@@ -268,6 +274,29 @@ pub fn process_file(
     let info = match probe(&ff.ffprobe, src, Duration::from_secs(120)) {
         Ok(i) => i,
         Err(e) => {
+            // Pre-encode health gate: when on, an unreadable source is a deliberate
+            // skip (recorded `unreadable`, flagged in the Library), not an encode
+            // failure. Gate `Off` keeps the legacy plain-failure behavior exactly.
+            if cfg.health_gate != HealthGate::Off {
+                let _ = manifest.record_health(
+                    path_str,
+                    HealthState::Unreadable.as_str(),
+                    Some("ffprobe could not read this file"),
+                    None,
+                    None,
+                );
+                set(
+                    manifest,
+                    path_str,
+                    Outcome::SkippedUnhealthy,
+                    StatusUpdate {
+                        error: Some(format!("unreadable: {e}")),
+                        ..Default::default()
+                    },
+                );
+                return ProcessResult::new(path_str, Outcome::SkippedUnhealthy)
+                    .with_message(format!("skipped — unreadable: {e}"));
+            }
             set(
                 manifest,
                 path_str,
@@ -286,6 +315,35 @@ pub fn process_file(
         height: o.height,
         ..Default::default()
     };
+
+    // Deep health gate: decode-probe the *source* before spending an encode, so
+    // silent corruption (truncation/garble a structural probe can't see) is caught
+    // and skipped/flagged, never encoded. Skipped in dry-run — a preview stays
+    // cheap and reports only the structural verdict. Reuses the shared detector, so
+    // a gated run can never disagree with a standalone scan.
+    if cfg.health_gate == HealthGate::Deep && !cfg.dry_run {
+        let (ok, detail) = decode_probe(&ff.ffmpeg, src, VerifyDepth::Fast);
+        if !ok {
+            let _ = manifest.record_health(
+                path_str,
+                HealthState::Corrupt.as_str(),
+                Some("decode errors — likely truncated or corrupted"),
+                None,
+                None,
+            );
+            set(
+                manifest,
+                path_str,
+                Outcome::SkippedUnhealthy,
+                StatusUpdate {
+                    error: Some(format!("corrupt source: {detail}")),
+                    ..meta_upd(&info)
+                },
+            );
+            return ProcessResult::new(path_str, Outcome::SkippedUnhealthy)
+                .with_message(format!("skipped — corrupt source: {detail}"));
+        }
+    }
 
     // Skip checks — shared with the projection via `predict_skip`, so the
     // estimate can never disagree with what a run actually does.
@@ -400,7 +458,13 @@ pub fn process_file(
         let abort_pred =
             |sec: f64, out_bytes: Option<u64>| judge.lock().unwrap().observe(sec, out_bytes);
         let mut on_progress = |sample: ProgressSample| reporter.on_file_progress(path_str, sample);
-        run_encode(&ff.ffmpeg, &args, &cancelled, &mut on_progress, Some(&abort_pred))
+        run_encode(
+            &ff.ffmpeg,
+            &args,
+            &cancelled,
+            &mut on_progress,
+            Some(&abort_pred),
+        )
     };
     // A real encode failure (non-zero, and not a cancel or an intentional early
     // abort). An `aborted` result is "no gain", not a failure — never retried.
@@ -425,9 +489,15 @@ pub fn process_file(
             encoder = %encoder.name,
             "GPU-resident encode failed; retrying with software decode + hardware encode"
         );
-        let sw_decode = Config { hardware_decode: false, ..cfg.clone() };
+        let sw_decode = Config {
+            hardware_decode: false,
+            ..cfg.clone()
+        };
         enc = attempt(&sw_decode, encoder);
-        fallback_stage = Some(format!("software decode + {} (hardware) encode", encoder.name));
+        fallback_stage = Some(format!(
+            "software decode + {} (hardware) encode",
+            encoder.name
+        ));
     }
     // Tier 3 — the hardware encoder itself can't handle this source; last resort is
     // the software encoder (which also takes the all-software decode/scale path).
@@ -448,9 +518,9 @@ pub fn process_file(
     // The note attached to the file if it ultimately succeeds. Combines a VMAF
     // "target unreachable → used preset" note with any encode-pipeline fallback.
     let encode_note = match (&fallback_stage, &preferred_err) {
-        (Some(stage), Some(err)) => {
-            Some(format!("Fell back to {stage}. Preferred (GPU) pipeline failed — {err}"))
-        }
+        (Some(stage), Some(err)) => Some(format!(
+            "Fell back to {stage}. Preferred (GPU) pipeline failed — {err}"
+        )),
         (Some(stage), None) => Some(format!("Fell back to {stage}.")),
         _ => None,
     };
@@ -509,12 +579,17 @@ pub fn process_file(
             path_str,
             Outcome::Failed,
             StatusUpdate {
-                error: Some(format!("ffmpeg rc={rc}: {}", tail_excerpt(&enc.stderr_tail, 400))),
+                error: Some(format!(
+                    "ffmpeg rc={rc}: {}",
+                    tail_excerpt(&enc.stderr_tail, 400)
+                )),
                 ..meta_upd(&info)
             },
         );
-        return ProcessResult::new(path_str, Outcome::Failed)
-            .with_message(format!("ffmpeg rc={rc}: {}", tail_excerpt(&enc.stderr_tail, 160)));
+        return ProcessResult::new(path_str, Outcome::Failed).with_message(format!(
+            "ffmpeg rc={rc}: {}",
+            tail_excerpt(&enc.stderr_tail, 160)
+        ));
     }
 
     let vr = verify_output(&ff.ffmpeg, &ff.ffprobe, cfg, &info, &out);
@@ -584,9 +659,17 @@ pub fn process_file(
             ..meta_upd(&info)
         },
     );
-    // The original was replaced, so any prior health scan of it is now stale —
-    // drop it from the Library (a rescan will pick up the new file).
-    let _ = manifest.clear_health(path_str);
+    // The output already passed verify_output's decode, so the final file *is*
+    // freshly-verified healthy. With the gate on, record that — a run populates the
+    // Library health view for free (the encoded output verified healthy at both
+    // ends). With the gate Off, keep the legacy behavior: just drop the now-stale
+    // scan of the replaced original. (codec/height were already set on the Done
+    // status above, so the health record only carries the verdict.)
+    if cfg.health_gate == HealthGate::Off {
+        let _ = manifest.clear_health(path_str);
+    } else {
+        let _ = manifest.record_health(path_str, HealthState::Healthy.as_str(), None, None, None);
+    }
 
     let mut result = ProcessResult::new(path_str, Outcome::Done);
     result.saved_bytes = saved;

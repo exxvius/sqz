@@ -31,6 +31,8 @@ function profileSummary(p: RunConfig): string {
   parts.push(p.vmaf_target != null ? `VMAF ${p.vmaf_target}` : QUALITY_LABEL[p.quality] ?? p.quality);
   parts.push(p.max_height > 4320 ? "no cap" : `≤${p.max_height}p`);
   parts.push(p.container.toUpperCase());
+  // Only surface a Deep gate — Off/Structural are the quiet defaults.
+  if (p.health_gate === "deep") parts.push("deep gate");
   return parts.join(" · ");
 }
 

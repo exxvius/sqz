@@ -11,6 +11,10 @@ export type EncoderFamily = "nvenc" | "amf" | "qsv" | "videotoolbox" | "software
 export type Container = "mkv" | "mp4";
 export type AudioMode = "copy" | "opus" | "aac";
 export type VerifyDepth = "fast" | "thorough" | "checksummed";
+/** Pre-encode source health gate. `off` = legacy (probe failure is a plain
+ *  failure). `structural` = classify+record health, skip unreadable sources
+ *  (near-free). `deep` = also decode-probe the source to catch silent corruption. */
+export type HealthGate = "off" | "structural" | "deep";
 export type ScaleFilter = "lanczos" | "bicubic" | "bilinear" | "area";
 export type BitDepth = "source" | "8" | "10";
 export type EncoderSpeed =
@@ -108,6 +112,8 @@ export interface RunConfig {
   audio_mode: AudioMode;
   audio_bitrate_kbps: number;
   verify_depth: VerifyDepth;
+  /** Health-check each source before encoding (skip/flag unreadable or corrupt). */
+  health_gate: HealthGate;
   ssim_floor?: number | null;
   /** VMAF quality mode: target a perceptual quality (0–100) instead of a fixed
    *  CRF. `null` = off (preset mode). */
@@ -140,6 +146,7 @@ export type Outcome =
   | "skipped_efficient"
   | "skipped_marginal"
   | "skipped_no_gain"
+  | "skipped_unhealthy"
   | "failed"
   | "cancelled"
   | "dry_run";
@@ -154,6 +161,7 @@ export type Status =
   | "skipped_already_efficient"
   | "skipped_marginal"
   | "skipped_no_gain"
+  | "skipped_unhealthy"
   | "failed";
 
 /** Per-file library health verdict (from a health scan). */
@@ -224,6 +232,8 @@ export interface RunSummary {
   done: number;
   normalized: number;
   skipped: number;
+  /** Sources the health gate rejected (unreadable/corrupt) and did not encode. */
+  skipped_unhealthy: number;
   failed: number;
   would: number;
   saved_bytes: number;

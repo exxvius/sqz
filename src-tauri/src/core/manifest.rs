@@ -16,6 +16,9 @@ pub const STATUS_NORMALIZED: &str = "normalized";
 pub const STATUS_SKIPPED_EFFICIENT: &str = "skipped_already_efficient";
 pub const STATUS_SKIPPED_NO_GAIN: &str = "skipped_no_gain";
 pub const STATUS_SKIPPED_MARGINAL: &str = "skipped_marginal";
+/// The pre-encode health gate rejected the source (unreadable or corrupt), so it
+/// was deliberately not encoded — distinct from `failed` (an encode that errored).
+pub const STATUS_SKIPPED_UNHEALTHY: &str = "skipped_unhealthy";
 pub const STATUS_FAILED: &str = "failed";
 /// Known to the library (discovered by a health scan) but not queued for
 /// encoding. A real run's `upsert_scanned` promotes it to `pending`; the claim
@@ -195,8 +198,7 @@ impl Manifest {
                 )?;
             }
             Some((old_size, old_mtime, status)) => {
-                let changed =
-                    old_size != size as i64 || (old_mtime - mtime).abs() > MTIME_TOL_SECS;
+                let changed = old_size != size as i64 || (old_mtime - mtime).abs() > MTIME_TOL_SECS;
                 let failed_retry = retry_failed && status == STATUS_FAILED;
                 // An `indexed` row is a library-only entry (health-scanned, never
                 // queued). When a run discovers it, promote it to `pending` so a
@@ -795,7 +797,12 @@ mod tests {
         m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
             .unwrap();
         let rows = m.history(&HistoryQuery::default()).unwrap();
-        assert!(rows.iter().find(|r| r.path == "/a.mkv").unwrap().fallback.is_none());
+        assert!(rows
+            .iter()
+            .find(|r| r.path == "/a.mkv")
+            .unwrap()
+            .fallback
+            .is_none());
     }
 
     #[test]
@@ -824,6 +831,18 @@ mod tests {
         assert_eq!(s.bytes_in, 100);
         assert_eq!(s.bytes_out, 40);
         assert!((s.encode_seconds - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn skipped_unhealthy_is_terminal_and_not_requeued() {
+        let m = mem_db();
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        m.set_status("/a.mkv", STATUS_SKIPPED_UNHEALTHY, &StatusUpdate::default())
+            .unwrap();
+        // Re-discovering the unchanged file must not re-queue it (retry_failed on
+        // only re-queues `failed`, never a deliberate unhealthy skip).
+        m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
+        assert!(m.pending_paths().unwrap().is_empty());
     }
 
     #[test]

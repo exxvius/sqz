@@ -24,6 +24,7 @@ const CHIPS: { id: Status; label: string }[] = [
   { id: "normalized", label: "Normalized" },
   { id: "failed", label: "Failed" },
   { id: "skipped_no_gain", label: "No gain" },
+  { id: "skipped_unhealthy", label: "Unhealthy" },
   { id: "skipped_already_efficient", label: "Efficient" },
   { id: "skipped_marginal", label: "Lean" },
   { id: "pending", label: "Pending" },

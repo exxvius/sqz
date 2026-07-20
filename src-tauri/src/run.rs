@@ -31,6 +31,8 @@ pub struct RunSummary {
     pub done: u64,
     pub normalized: u64,
     pub skipped: u64,
+    /// Sources the health gate rejected (unreadable/corrupt) and did not encode.
+    pub skipped_unhealthy: u64,
     pub failed: u64,
     pub would: u64,
     pub saved_bytes: i64,
@@ -70,6 +72,7 @@ fn tally(summary: &Mutex<RunSummary>, outcome: Outcome, saved: i64) {
         Outcome::SkippedEfficient | Outcome::SkippedMarginal | Outcome::SkippedNoGain => {
             s.skipped += 1;
         }
+        Outcome::SkippedUnhealthy => s.skipped_unhealthy += 1,
         Outcome::Failed => s.failed += 1,
         Outcome::DryRun => s.would += 1,
         Outcome::Cancelled => {}

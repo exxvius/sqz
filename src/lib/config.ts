@@ -21,6 +21,7 @@ export const defaultConfig = (): RunConfig => ({
   audio_mode: "copy",
   audio_bitrate_kbps: 128,
   verify_depth: "fast",
+  health_gate: "structural",
   ssim_floor: null,
   vmaf_target: null,
   vmaf_samples: 0,

@@ -6,6 +6,7 @@ import type {
   BitDepth,
   Container,
   EncoderSpeed,
+  HealthGate,
   OnSuccess,
   Order,
   RunConfig,
@@ -40,6 +41,12 @@ const VERIFY_OPTIONS: { value: VerifyDepth; label: string }[] = [
   { value: "fast", label: "Fast (head + tail)" },
   { value: "thorough", label: "Thorough (full video)" },
   { value: "checksummed", label: "Checksummed (all streams)" },
+];
+
+const HEALTH_GATE_OPTIONS: { value: HealthGate; label: string }[] = [
+  { value: "off", label: "Off (encode without checking)" },
+  { value: "structural", label: "Structural (probe — near-free)" },
+  { value: "deep", label: "Deep (decode-probe the source)" },
 ];
 
 const SCALE_OPTIONS: { value: ScaleFilter; label: string }[] = [
@@ -383,6 +390,22 @@ export function AdvancedOptions({ config, patch }: Props) {
                 options={VERIFY_OPTIONS}
                 ariaLabel="Verification depth"
                 onChange={(v) => patch({ verify_depth: v as VerifyDepth, paranoid: false })}
+              />
+            </div>
+            <div className="field">
+              <label>
+                Health-check before encoding
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  Check each source before encoding it. Unreadable or corrupt files
+                  are skipped and flagged, never encoded. Deep also decode-probes the
+                  source to catch silent corruption.
+                </div>
+              </label>
+              <Select
+                value={config.health_gate}
+                options={HEALTH_GATE_OPTIONS}
+                ariaLabel="Health-check before encoding"
+                onChange={(v) => patch({ health_gate: v as HealthGate })}
               />
             </div>
             <Switch
