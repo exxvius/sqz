@@ -16,6 +16,7 @@ import type {
   AudioMode,
   BitDepth,
   Container,
+  EncoderSpeed,
   FfStatus,
   OnSuccess,
   Order,
@@ -68,6 +69,16 @@ const SCALE_OPTIONS: { value: ScaleFilter; label: string }[] = [
   { value: "bicubic", label: "Bicubic (sharp)" },
   { value: "bilinear", label: "Bilinear (soft, no ringing)" },
   { value: "area", label: "Area (no ringing, preserves edges)" },
+];
+
+const ENCODER_SPEED_OPTIONS: { value: EncoderSpeed; label: string }[] = [
+  { value: "best", label: "Best (slowest)" },
+  { value: "better", label: "Better" },
+  { value: "good", label: "Good" },
+  { value: "balanced", label: "Balanced (default)" },
+  { value: "fast", label: "Fast" },
+  { value: "faster", label: "Faster" },
+  { value: "fastest", label: "Fastest" },
 ];
 
 const ORDER_OPTIONS: { value: Order; label: string }[] = [
@@ -402,6 +413,21 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
             )}
             <div className="field">
               <label>
+                Encoder speed
+                <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                  Speed vs. quality-per-size on the hardware (NVENC) encoder. Slower is
+                  smaller/better; faster reclaims sooner. Balanced is a good default.
+                </div>
+              </label>
+              <Select
+                value={config.encoder_speed}
+                options={ENCODER_SPEED_OPTIONS}
+                ariaLabel="Encoder speed"
+                onChange={(v) => patch({ encoder_speed: v as EncoderSpeed })}
+              />
+            </div>
+            <div className="field">
+              <label>
                 Processing order
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
                   Largest-first reclaims space soonest.
@@ -479,10 +505,10 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
               />
             )}
             <Switch
-              label="Hardware decode"
-              hint="Decode on the GPU too (NVIDIA only). Faster, less robust on unusual sources."
-              checked={config.hwaccel_decode}
-              onChange={(hwaccel_decode) => patch({ hwaccel_decode })}
+              label="GPU-resident pipeline"
+              hint="Keep decode, scaling, and encode on the GPU (NVIDIA NVENC) — no GPU↔CPU copies. Falls back to software automatically when a source isn't supported. Turn off to force software decode."
+              checked={config.hardware_decode}
+              onChange={(hardware_decode) => patch({ hardware_decode })}
             />
           </div>
         </Collapsible>

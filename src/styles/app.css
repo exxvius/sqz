@@ -1074,6 +1074,8 @@
   background: var(--bg-elev-2);
   position: relative;
   transition: background var(--duration-fast);
+  /* Never let a long label/hint squeeze the toggle narrower than its 40px. */
+  flex-shrink: 0;
 }
 .switch[aria-checked="true"] {
   background: var(--accent);

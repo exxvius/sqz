@@ -38,11 +38,15 @@ fn save_config(data_dir: &Path, cfg: &FfConfig) -> Result<(), String> {
 /// Resolve the current FfBin, honoring any saved custom paths.
 pub fn current(data_dir: &Path) -> FfBin {
     let cfg = load_config(data_dir);
-    FfBin::resolve(
+    let mut ff = FfBin::resolve(
         data_dir,
         cfg.ffmpeg.as_deref().map(Path::new),
         cfg.ffprobe.as_deref().map(Path::new),
-    )
+    );
+    // Probe GPU capabilities once here so the per-file encode path can pick the
+    // fastest valid pipeline without re-querying ffmpeg.
+    ff.detect_caps();
+    ff
 }
 
 /// Confirm a binary runs (so we don't save a broken path).

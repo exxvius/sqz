@@ -173,6 +173,36 @@ pub enum BitDepth {
     Ten,
 }
 
+/// Encoder speed/quality trade-off, in generic terms. Maps to NVENC's `-preset`
+/// scale (`p1` fastest … `p7` slowest/best); slower presets spend more effort for
+/// better quality-per-bitrate. Currently applied to the NVENC path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EncoderSpeed {
+    Best,     // p7
+    Better,   // p6
+    Good,     // p5
+    Balanced, // p4 (default)
+    Fast,     // p3
+    Faster,   // p2
+    Fastest,  // p1
+}
+
+impl EncoderSpeed {
+    /// The NVENC `-preset` value for this speed.
+    pub fn nvenc_preset(self) -> &'static str {
+        match self {
+            EncoderSpeed::Best => "p7",
+            EncoderSpeed::Better => "p6",
+            EncoderSpeed::Good => "p5",
+            EncoderSpeed::Balanced => "p4",
+            EncoderSpeed::Fast => "p3",
+            EncoderSpeed::Faster => "p2",
+            EncoderSpeed::Fastest => "p1",
+        }
+    }
+}
+
 /// Scaling filter used when downscaling a source taller than `max_height`.
 ///
 /// The default (Lanczos) is sharpest but *rings* — it overshoots at high-contrast
@@ -251,6 +281,8 @@ pub struct Config {
     pub scale_filter: ScaleFilter,
     /// Output bit depth (defaults to matching the source).
     pub bit_depth: BitDepth,
+    /// Encoder speed/quality trade-off (NVENC preset). Defaults to Balanced.
+    pub encoder_speed: EncoderSpeed,
     pub temp_dir: Option<PathBuf>,
     pub db_path: Option<PathBuf>,
     pub on_success: OnSuccess,
@@ -272,7 +304,12 @@ pub struct Config {
     /// Processing order for pending files.
     pub order: Order,
     pub paranoid: bool,
-    pub hwaccel_decode: bool,
+    /// Use the GPU-resident pipeline (NVDEC decode → CUDA frames → GPU scale →
+    /// NVENC) whenever the source, encoder, and FFmpeg build support it. On by
+    /// default; turning it off forces software decode for a rare problem source.
+    /// The engine still falls back to software automatically when the fast path
+    /// isn't valid, so this never causes a failure on its own.
+    pub hardware_decode: bool,
     pub dry_run: bool,
     pub force: bool,
     pub skip_marginal: bool,
@@ -302,6 +339,7 @@ impl Default for Config {
             max_height: DEFAULT_MAX_HEIGHT,
             scale_filter: ScaleFilter::Lanczos,
             bit_depth: BitDepth::Source,
+            encoder_speed: EncoderSpeed::Balanced,
             temp_dir: None,
             db_path: None,
             on_success: OnSuccess::Recycle,
@@ -315,7 +353,7 @@ impl Default for Config {
             skip_dolby_vision: true,
             order: Order::Smart,
             paranoid: false,
-            hwaccel_decode: false,
+            hardware_decode: true,
             dry_run: false,
             force: false,
             skip_marginal: false,

@@ -14,6 +14,7 @@ pub mod encoders;
 pub mod estimate;
 pub mod ffbin;
 pub mod health;
+pub mod hwcaps;
 pub mod lock;
 pub mod manifest;
 pub mod paths;

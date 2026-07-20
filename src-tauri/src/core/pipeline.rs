@@ -306,7 +306,7 @@ pub fn process_file(
         uuid::Uuid::new_v4().simple(),
         cfg.container.ext()
     ));
-    let args = build_args(cfg, &info, encoder, &out);
+    let args = build_args(cfg, &info, encoder, &ff.caps, &out);
 
     // Staged early-abort judge, driven by ffmpeg progress ticks.
     let judge = Mutex::new(AbortJudge::new(AbortConfig::from(cfg, info.duration, size)));

@@ -13,6 +13,14 @@ export type AudioMode = "copy" | "opus" | "aac";
 export type VerifyDepth = "fast" | "thorough" | "checksummed";
 export type ScaleFilter = "lanczos" | "bicubic" | "bilinear" | "area";
 export type BitDepth = "source" | "8" | "10";
+export type EncoderSpeed =
+  | "best"
+  | "better"
+  | "good"
+  | "balanced"
+  | "fast"
+  | "faster"
+  | "fastest";
 export type Order =
   | "smart"
   | "largest-first"
@@ -92,6 +100,7 @@ export interface RunConfig {
   max_height: number;
   scale_filter: ScaleFilter;
   bit_depth: BitDepth;
+  encoder_speed: EncoderSpeed;
   on_success: OnSuccess;
   holding_dir?: string | null;
   holding_retention_days: number;
@@ -103,7 +112,7 @@ export interface RunConfig {
   skip_dolby_vision: boolean;
   order: Order;
   paranoid: boolean;
-  hwaccel_decode: boolean;
+  hardware_decode: boolean;
   dry_run: boolean;
   force: boolean;
   skip_marginal: boolean;

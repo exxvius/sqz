@@ -9,12 +9,17 @@
 
 use std::path::{Path, PathBuf};
 
+use super::hwcaps::HwCaps;
+
 const EXE_SUFFIX: &str = std::env::consts::EXE_SUFFIX;
 
 #[derive(Debug, Clone)]
 pub struct FfBin {
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,
+    /// GPU-pipeline capabilities of this build (empty until [`detect_caps`] runs).
+    /// [`detect_caps`]: FfBin::detect_caps
+    pub caps: HwCaps,
 }
 
 /// Directory the downloader writes ffmpeg/ffprobe into.
@@ -56,6 +61,15 @@ impl FfBin {
         Self {
             ffmpeg: resolve_one("ffmpeg", "SQZ_FFMPEG", data_dir, custom_ffmpeg),
             ffprobe: resolve_one("ffprobe", "SQZ_FFPROBE", data_dir, custom_ffprobe),
+            caps: HwCaps::default(),
+        }
+    }
+
+    /// Probe and record the build's GPU capabilities. Cheap; call once after the
+    /// binaries are resolved (skips the probe when ffmpeg isn't present yet).
+    pub fn detect_caps(&mut self) {
+        if self.ffmpeg.exists() {
+            self.caps = super::hwcaps::detect(&self.ffmpeg);
         }
     }
 

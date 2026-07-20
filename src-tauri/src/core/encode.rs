@@ -13,8 +13,16 @@ use std::time::Duration;
 use super::abort::AbortProjection;
 use super::config::{AudioMode, BitDepth, Config, Container};
 use super::encoders::{Encoder, EncoderFamily};
+use super::hwcaps::HwCaps;
 use super::probe::MediaInfo;
 use super::util::command_no_window;
+
+/// Source codecs NVDEC reliably decodes on Maxwell-and-newer GPUs. A source
+/// outside this set (rare/old formats) takes the software-decode path — never a
+/// hard failure. Names are ffprobe `codec_name` values.
+const NVDEC_CODECS: &[&str] = &[
+    "h264", "hevc", "av1", "vp9", "vp8", "mpeg2video", "mpeg4", "vc1",
+];
 
 /// Outcome of one encode. `returncode == None` ⇒ cancelled or aborted.
 #[derive(Debug, Default)]
@@ -98,6 +106,80 @@ fn pix_fmt(cfg: &Config, info: &MediaInfo, encoder: &Encoder) -> &'static str {
     }
 }
 
+/// The CUDA surface format NVDEC/scale_cuda/NVENC use for a given bit depth:
+/// 8-bit → semi-planar `nv12`, 10-bit → `p010le`.
+fn cuda_frame_fmt(depth: u8) -> &'static str {
+    if depth >= 10 {
+        "p010le"
+    } else {
+        "nv12"
+    }
+}
+
+/// True if a downscale to `max_height` is needed for this source.
+fn needs_downscale(cfg: &Config, info: &MediaInfo) -> bool {
+    info.height.map(|h| h > cfg.max_height).unwrap_or(false)
+}
+
+/// Decide whether the fully GPU-resident CUDA pipeline (NVDEC → CUDA frames →
+/// GPU scale → NVENC, zero host copies) is both valid and beneficial for this
+/// file. When it returns false the caller takes the software-decode path, which
+/// handles everything correctly — so this is purely a fast-path opt-in.
+///
+/// Gated on: the setting, an NVENC encoder, a build with `cuda` hwaccel, a source
+/// NVDEC can decode, a ≤10-bit target (NVDEC/NVENC cap), no Dolby Vision, and — if
+/// the frame needs resizing or a depth change — an available GPU scaler to do it
+/// without leaving the GPU.
+fn use_cuda_pipeline(cfg: &Config, info: &MediaInfo, encoder: &Encoder, caps: &HwCaps) -> bool {
+    if !cfg.hardware_decode
+        || encoder.family != EncoderFamily::Nvenc
+        || !caps.cuda
+        || info.dolby_vision
+        || info.is_12bit()
+        || target_bit_depth(cfg, info) > 10
+    {
+        return false;
+    }
+    let decodable = info
+        .codec
+        .as_deref()
+        .map(|c| NVDEC_CODECS.contains(&c))
+        .unwrap_or(false);
+    if !decodable {
+        return false;
+    }
+    // A resize or a bit-depth change must run on the GPU too; that needs a GPU
+    // scaler. Pure passthrough (no resize, no depth change) needs none.
+    let needs_gpu_filter =
+        needs_downscale(cfg, info) || target_bit_depth(cfg, info) != info.bit_depth();
+    !needs_gpu_filter || caps.gpu_scale()
+}
+
+/// The GPU video-filter string for the CUDA pipeline, or `None` when the frames
+/// can pass straight from NVDEC to NVENC untouched. Resizes with `scale_cuda`/
+/// `scale_npp`, and sets the output surface format only when the depth changes
+/// (otherwise the native format passes through, for max filter compatibility).
+fn cuda_vf(cfg: &Config, info: &MediaInfo, caps: &HwCaps) -> Option<String> {
+    let scaler = caps.scaler()?;
+    let downscale = needs_downscale(cfg, info);
+    let target = target_bit_depth(cfg, info);
+    let depth_change = target != info.bit_depth();
+    if !downscale && !depth_change {
+        return None;
+    }
+    let dims = if downscale {
+        format!("-2:{}", cfg.max_height)
+    } else {
+        "iw:ih".to_string()
+    };
+    let fmt = if depth_change {
+        format!(":format={}", cuda_frame_fmt(target))
+    } else {
+        String::new()
+    };
+    Some(format!("{scaler}={dims}{fmt}"))
+}
+
 /// True for a color-characteristic value worth passing to the encoder.
 fn meaningful_color(v: &str) -> bool {
     let v = v.trim();
@@ -161,12 +243,12 @@ fn videotoolbox_quality(q: i32) -> i32 {
 }
 
 /// Family-specific rate-control + preset flags for a target quality `q`
-/// (CRF-like, lower = better).
-fn encoder_rate_args(encoder: &Encoder, q: i32) -> Vec<String> {
+/// (CRF-like, lower = better). The NVENC `-preset` comes from `cfg.encoder_speed`.
+fn encoder_rate_args(cfg: &Config, encoder: &Encoder, q: i32) -> Vec<String> {
     let q = q.to_string();
     match encoder.family {
         EncoderFamily::Nvenc => vec![
-            "-preset".into(), "p6".into(),
+            "-preset".into(), cfg.encoder_speed.nvenc_preset().into(),
             "-rc".into(), "vbr".into(),
             "-cq".into(), q,
             "-b:v".into(), "0".into(),
@@ -194,7 +276,20 @@ fn encoder_rate_args(encoder: &Encoder, q: i32) -> Vec<String> {
 }
 
 /// Build the FFmpeg argument list (excluding the program path itself).
-pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &Path) -> Vec<String> {
+///
+/// Chooses the fastest valid pipeline: a fully GPU-resident CUDA path (NVDEC →
+/// CUDA frames → GPU scale → NVENC, no host copies) when [`use_cuda_pipeline`]
+/// allows, otherwise software decode (with a software scaler and NVENC upload, or
+/// an all-CPU encode). `caps` is the resolved build's probed GPU capabilities.
+pub fn build_args(
+    cfg: &Config,
+    info: &MediaInfo,
+    encoder: &Encoder,
+    caps: &HwCaps,
+    out_path: &Path,
+) -> Vec<String> {
+    let cuda = use_cuda_pipeline(cfg, info, encoder, caps);
+
     let mut a: Vec<String> = vec![
         "-hide_banner".into(),
         "-nostdin".into(),
@@ -204,10 +299,14 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
         "pipe:1".into(),
     ];
 
-    // CUDA decode only helps (and is only valid) for the NVENC path.
-    if cfg.hwaccel_decode && encoder.family == EncoderFamily::Nvenc {
-        a.push("-hwaccel".into());
-        a.push("cuda".into());
+    // GPU-resident decode: NVDEC decodes straight into CUDA frames that stay on
+    // the device through scaling and into NVENC — no GPU→CPU→GPU round trip.
+    if cuda {
+        a.extend(
+            ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
     }
 
     a.push("-i".into());
@@ -232,31 +331,41 @@ pub fn build_args(cfg: &Config, info: &MediaInfo, encoder: &Encoder, out_path: &
             .map(|s| s.to_string()),
     );
 
-    if let Some(h) = info.height {
-        if h > cfg.max_height {
+    // Scaling: on the GPU with scale_cuda/scale_npp (frames never leave the GPU),
+    // or the software scaler on the CPU path.
+    if cuda {
+        if let Some(vf) = cuda_vf(cfg, info, caps) {
             a.push("-vf".into());
-            a.push(format!("scale=-2:{}:flags={}", cfg.max_height, cfg.scale_filter.flags()));
+            a.push(vf);
         }
+    } else if needs_downscale(cfg, info) {
+        a.push("-vf".into());
+        a.push(format!("scale=-2:{}:flags={}", cfg.max_height, cfg.scale_filter.flags()));
     }
 
     a.push("-c".into());
     a.push("copy".into());
     a.push("-c:v".into());
     a.push(encoder.name.clone());
-    a.extend(encoder_rate_args(encoder, cfg.resolved_quality()));
+    a.extend(encoder_rate_args(cfg, encoder, cfg.resolved_quality()));
 
-    let pf = pix_fmt(cfg, info, encoder);
-    let (target, out_depth) = (target_bit_depth(cfg, info), pf_bit_depth(pf));
-    if out_depth < target {
-        tracing::warn!(
-            encoder = %encoder.name,
-            target, out_depth,
-            "requested {target}-bit output stepped down to {out_depth}-bit: {} can't carry it",
-            encoder.name
-        );
+    // Pixel format: only on the software path. On the CUDA path the surface format
+    // is already correct — native from NVDEC, or set by the GPU scaler's `format=`
+    // — and forcing `-pix_fmt` there would insert a needless conversion.
+    if !cuda {
+        let pf = pix_fmt(cfg, info, encoder);
+        let (target, out_depth) = (target_bit_depth(cfg, info), pf_bit_depth(pf));
+        if out_depth < target {
+            tracing::warn!(
+                encoder = %encoder.name,
+                target, out_depth,
+                "requested {target}-bit output stepped down to {out_depth}-bit: {} can't carry it",
+                encoder.name
+            );
+        }
+        a.push("-pix_fmt".into());
+        a.push(pf.into());
     }
-    a.push("-pix_fmt".into());
-    a.push(pf.into());
 
     // Preserve HDR/color characteristics on re-encode.
     if info.is_hdr() {
@@ -462,7 +571,19 @@ pub fn run_encode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::config::{AudioMode, BitDepth, Codec, Config, Container, ScaleFilter};
+    use super::super::config::{
+        AudioMode, BitDepth, Codec, Config, Container, EncoderSpeed, ScaleFilter,
+    };
+    use super::super::hwcaps::HwCaps;
+
+    /// Empty caps → forces the software-decode path (what the pre-GPU tests expect).
+    fn sw() -> HwCaps {
+        HwCaps::default()
+    }
+    /// Full CUDA caps → enables the GPU-resident path.
+    fn cuda() -> HwCaps {
+        HwCaps { cuda: true, scale_cuda: true, scale_npp: false }
+    }
     use super::super::encoders::Encoder;
     use std::path::PathBuf;
 
@@ -493,7 +614,7 @@ mod tests {
     #[test]
     fn nvenc_uses_cq_flags() {
         let cfg = Config { codec: Codec::Av1, ..Config::default() };
-        let a = build_args(&cfg, &info(1080, false), &enc("av1_nvenc", EncoderFamily::Nvenc), Path::new("o.mkv"));
+        let a = build_args(&cfg, &info(1080, false), &enc("av1_nvenc", EncoderFamily::Nvenc), &sw(), Path::new("o.mkv"));
         let joined = a.join(" ");
         assert!(joined.contains("-c:v av1_nvenc"));
         assert!(joined.contains("-cq 30"));
@@ -501,9 +622,27 @@ mod tests {
     }
 
     #[test]
+    fn nvenc_preset_defaults_to_p4_and_follows_encoder_speed() {
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        // Default speed = Balanced → p4.
+        let a = build_args(&Config::default(), &info(1080, false), &e, &sw(), Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-preset p4"));
+        // Each speed maps to its NVENC preset.
+        for (speed, pn) in [
+            (EncoderSpeed::Best, "p7"),
+            (EncoderSpeed::Good, "p5"),
+            (EncoderSpeed::Fastest, "p1"),
+        ] {
+            let cfg = Config { encoder_speed: speed, ..Config::default() };
+            let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mkv")).join(" ");
+            assert!(a.contains(&format!("-preset {pn}")), "{speed:?} → {pn}");
+        }
+    }
+
+    #[test]
     fn software_uses_crf() {
         let cfg = Config { codec: Codec::Hevc, ..Config::default() };
-        let a = build_args(&cfg, &info(1080, false), &enc("libx265", EncoderFamily::Software), Path::new("o.mkv"));
+        let a = build_args(&cfg, &info(1080, false), &enc("libx265", EncoderFamily::Software), &sw(), Path::new("o.mkv"));
         let joined = a.join(" ");
         assert!(joined.contains("-c:v libx265"));
         assert!(joined.contains("-crf 25"));
@@ -514,8 +653,8 @@ mod tests {
     fn downscale_only_when_taller() {
         let cfg = Config::default();
         let e = enc("av1_nvenc", EncoderFamily::Nvenc);
-        let tall = build_args(&cfg, &info(2160, false), &e, Path::new("o.mkv")).join(" ");
-        let short = build_args(&cfg, &info(720, false), &e, Path::new("o.mkv")).join(" ");
+        let tall = build_args(&cfg, &info(2160, false), &e, &sw(), Path::new("o.mkv")).join(" ");
+        let short = build_args(&cfg, &info(720, false), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(tall.contains("scale=-2:1080:flags=lanczos"));
         assert!(!short.contains("scale="));
     }
@@ -524,7 +663,7 @@ mod tests {
     fn scale_filter_threads_into_the_vf() {
         let cfg = Config { scale_filter: ScaleFilter::Area, ..Config::default() };
         let e = enc("av1_nvenc", EncoderFamily::Nvenc);
-        let a = build_args(&cfg, &info(2160, false), &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(2160, false), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("scale=-2:1080:flags=area"));
     }
 
@@ -532,7 +671,7 @@ mod tests {
     fn ten_bit_selects_p010le() {
         let cfg = Config::default();
         let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
-        let a = build_args(&cfg, &info(1080, true), &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(1080, true), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("-pix_fmt p010le"));
     }
 
@@ -568,7 +707,7 @@ mod tests {
             "p010le"
         );
         // End to end, the pix_fmt flag is emitted.
-        let a = build_args(&cfg, &info(1080, false), &enc("av1_nvenc", EncoderFamily::Nvenc), Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &enc("av1_nvenc", EncoderFamily::Nvenc), &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("-pix_fmt p010le"));
     }
 
@@ -605,7 +744,7 @@ mod tests {
         m.color_transfer = Some("smpte2084".into());
         m.color_space = Some("bt2020nc".into());
         m.color_range = Some("tv".into());
-        let a = build_args(&cfg, &m, &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &m, &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("-color_primaries bt2020"));
         assert!(a.contains("-color_trc smpte2084"));
         assert!(a.contains("-colorspace bt2020nc"));
@@ -619,7 +758,7 @@ mod tests {
         let mut m = info(1080, false);
         m.color_primaries = Some("unknown".into());
         m.color_transfer = Some("bt709".into());
-        let a = build_args(&cfg, &m, &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &m, &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(!a.contains("-color_primaries"));
         assert!(a.contains("-color_trc bt709"));
     }
@@ -628,7 +767,7 @@ mod tests {
     fn mp4_container_uses_movtext_faststart_and_drops_attachments() {
         let cfg = Config { container: Container::Mp4, ..Config::default() };
         let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
-        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mp4")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mp4")).join(" ");
         assert!(a.contains("-c:s mov_text"));
         assert!(a.contains("-movflags +faststart"));
         assert!(!a.contains("0:t?")); // no attachment mapping in MP4
@@ -638,7 +777,7 @@ mod tests {
     fn audio_transcode_emits_codec_and_bitrate() {
         let cfg = Config { audio_mode: AudioMode::Opus, audio_bitrate_kbps: 160, ..Config::default() };
         let e = enc("libx265", EncoderFamily::Software);
-        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("-c:a libopus"));
         assert!(a.contains("-b:a 160k"));
     }
@@ -647,7 +786,7 @@ mod tests {
     fn mp4_opus_downgrades_to_aac() {
         let cfg = Config { container: Container::Mp4, audio_mode: AudioMode::Opus, ..Config::default() };
         let e = enc("h264_nvenc", EncoderFamily::Nvenc);
-        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mp4")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mp4")).join(" ");
         assert!(a.contains("-c:a aac"));
         assert!(!a.contains("libopus"));
     }
@@ -656,7 +795,7 @@ mod tests {
     fn copy_audio_adds_no_audio_codec_flag() {
         let cfg = Config::default();
         let e = enc("libx265", EncoderFamily::Software);
-        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(!a.contains("-c:a"));
     }
 
@@ -664,10 +803,107 @@ mod tests {
     fn keeps_streams_and_drops_data() {
         let cfg = Config::default();
         let e = enc("av1_nvenc", EncoderFamily::Nvenc);
-        let a = build_args(&cfg, &info(1080, false), &e, Path::new("o.mkv")).join(" ");
+        let a = build_args(&cfg, &info(1080, false), &e, &sw(), Path::new("o.mkv")).join(" ");
         assert!(a.contains("-map 0:V?"));
         assert!(a.contains("-map 0:a?"));
         assert!(a.contains("-map 0:s?"));
         assert!(a.contains("-map_chapters 0"));
+    }
+
+    // ---- GPU-resident (CUDA) pipeline ----------------------------------------
+
+    #[test]
+    fn cuda_pipeline_is_zero_copy_with_no_downscale() {
+        let cfg = Config::default();
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        // h264 1080p source, target codec av1, no resize, no depth change.
+        let a = build_args(&cfg, &info(1080, false), &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-hwaccel cuda -hwaccel_output_format cuda"));
+        assert!(a.contains("-c:v av1_nvenc"));
+        // Frames pass straight through: no filter, and no CPU-side pix_fmt convert.
+        assert!(!a.contains("-vf"));
+        assert!(!a.contains("-pix_fmt"));
+        assert!(!a.contains("scale=")); // no software scaler
+    }
+
+    #[test]
+    fn cuda_pipeline_scales_on_gpu_when_downscaling() {
+        let cfg = Config::default(); // max_height 1080
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(2160, false), &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-hwaccel_output_format cuda"));
+        assert!(a.contains("scale_cuda=-2:1080"));
+        assert!(!a.contains("scale=-2:1080:flags")); // not the software scaler
+        assert!(!a.contains("-pix_fmt"));
+    }
+
+    #[test]
+    fn cuda_falls_back_to_software_scaler_when_no_gpu_scaler() {
+        let cfg = Config::default();
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        // cuda hwaccel present but NO gpu scaler → downscale must go software.
+        let caps = HwCaps { cuda: true, scale_cuda: false, scale_npp: false };
+        let a = build_args(&cfg, &info(2160, false), &e, &caps, Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-hwaccel_output_format cuda"));
+        assert!(a.contains("scale=-2:1080:flags="));
+        assert!(a.contains("-pix_fmt"));
+    }
+
+    #[test]
+    fn cuda_used_for_passthrough_even_without_gpu_scaler() {
+        // No resize/depth change needs no scaler, so the GPU path still applies.
+        let cfg = Config::default();
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        let caps = HwCaps { cuda: true, scale_cuda: false, scale_npp: false };
+        let a = build_args(&cfg, &info(1080, false), &e, &caps, Path::new("o.mkv")).join(" ");
+        assert!(a.contains("-hwaccel_output_format cuda"));
+    }
+
+    #[test]
+    fn unsupported_source_codec_takes_software_decode() {
+        let cfg = Config::default();
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        let mut m = info(1080, false);
+        m.codec = Some("prores".into()); // NVDEC can't decode it
+        let a = build_args(&cfg, &m, &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-hwaccel"));
+        assert!(a.contains("-pix_fmt"));
+    }
+
+    #[test]
+    fn software_encoder_never_uses_cuda() {
+        let cfg = Config::default();
+        let e = enc("libx265", EncoderFamily::Software);
+        let a = build_args(&cfg, &info(2160, false), &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-hwaccel"));
+        assert!(a.contains("scale=-2:1080:flags="));
+    }
+
+    #[test]
+    fn hardware_decode_off_forces_software() {
+        let cfg = Config { hardware_decode: false, ..Config::default() };
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(1080, false), &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-hwaccel"));
+    }
+
+    #[test]
+    fn cuda_forced_ten_bit_sets_scaler_format() {
+        // 8-bit source, forced 10-bit, no downscale → GPU format-only conversion.
+        let cfg = Config { bit_depth: BitDepth::Ten, ..Config::default() };
+        let e = enc("av1_nvenc", EncoderFamily::Nvenc);
+        let a = build_args(&cfg, &info(1080, false), &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(a.contains("scale_cuda=iw:ih:format=p010le"));
+        assert!(!a.contains("-pix_fmt"));
+    }
+
+    #[test]
+    fn twelve_bit_source_uses_software_even_on_cuda() {
+        let cfg = Config::default();
+        let e = enc("hevc_nvenc", EncoderFamily::Nvenc);
+        let mut m = info(1080, false);
+        m.pix_fmt = Some("yuv420p12le".into());
+        let a = build_args(&cfg, &m, &e, &cuda(), Path::new("o.mkv")).join(" ");
+        assert!(!a.contains("-hwaccel")); // NVDEC/NVENC top out at 10-bit
     }
 }
