@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::abort::{AbortConfig, AbortJudge, AbortProjection};
 use super::config::{Config, HealthGate, VerifyDepth};
-use super::decode::decode_probe;
+use super::decode::decode_probe_progress;
 use super::encode::{build_args_q, build_remux_args, run_encode, EncodeResult, ProgressSample};
 use super::encoders::Encoder;
 use super::estimate::{predict_skip, SkipKind};
@@ -316,35 +316,6 @@ pub fn process_file(
         ..Default::default()
     };
 
-    // Deep health gate: decode-probe the *source* before spending an encode, so
-    // silent corruption (truncation/garble a structural probe can't see) is caught
-    // and skipped/flagged, never encoded. Skipped in dry-run — a preview stays
-    // cheap and reports only the structural verdict. Reuses the shared detector, so
-    // a gated run can never disagree with a standalone scan.
-    if cfg.health_gate == HealthGate::Deep && !cfg.dry_run {
-        let (ok, detail) = decode_probe(&ff.ffmpeg, src, VerifyDepth::Fast);
-        if !ok {
-            let _ = manifest.record_health(
-                path_str,
-                HealthState::Corrupt.as_str(),
-                Some("decode errors — likely truncated or corrupted"),
-                None,
-                None,
-            );
-            set(
-                manifest,
-                path_str,
-                Outcome::SkippedUnhealthy,
-                StatusUpdate {
-                    error: Some(format!("corrupt source: {detail}")),
-                    ..meta_upd(&info)
-                },
-            );
-            return ProcessResult::new(path_str, Outcome::SkippedUnhealthy)
-                .with_message(format!("skipped — corrupt source: {detail}"));
-        }
-    }
-
     // Skip checks — shared with the projection via `predict_skip`, so the
     // estimate can never disagree with what a run actually does.
     // • Dolby Vision: re-encoding drops the DV enhancement layer/RPU (a lossless
@@ -435,9 +406,54 @@ pub fn process_file(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // Open the file's Live card first, so a VMAF search (which runs before the
-    // real encode) is visible on it rather than looking like a stall.
+    // Open the file's Live card first, so the pre-encode work (the Deep health
+    // gate below, then any VMAF search) is visible on it rather than looking like
+    // a stall. This is why the gate runs *after* on_file_start, not before it.
     reporter.on_file_start(path_str, &name, info.duration, size);
+
+    // Deep health gate: decode-probe the *source* before spending an encode, so
+    // silent corruption (truncation/garble a structural probe can't see) is caught
+    // and skipped/flagged, never encoded. It reports smooth progress on the now-open
+    // Live card ("Checking health…") and is cancellable. Reuses the shared detector,
+    // so a gated run can never disagree with a standalone scan. (Unreachable in
+    // dry-run — that returns above, before the card opens.)
+    if cfg.health_gate == HealthGate::Deep {
+        reporter.on_health_progress(path_str, 0.0);
+        let on_health = |f: f64| reporter.on_health_progress(path_str, f);
+        let (ok, detail) = decode_probe_progress(
+            &ff.ffmpeg,
+            src,
+            VerifyDepth::Fast,
+            info.duration,
+            &cancelled,
+            &on_health,
+        );
+        if cancelled() {
+            reporter.on_file_end(path_str);
+            return ProcessResult::new(path_str, Outcome::Cancelled);
+        }
+        if !ok {
+            reporter.on_file_end(path_str);
+            let _ = manifest.record_health(
+                path_str,
+                HealthState::Corrupt.as_str(),
+                Some("decode errors — likely truncated or corrupted"),
+                None,
+                None,
+            );
+            set(
+                manifest,
+                path_str,
+                Outcome::SkippedUnhealthy,
+                StatusUpdate {
+                    error: Some(format!("corrupt source: {detail}")),
+                    ..meta_upd(&info)
+                },
+            );
+            return ProcessResult::new(path_str, Outcome::SkippedUnhealthy)
+                .with_message(format!("skipped — corrupt source: {detail}"));
+        }
+    }
 
     // Resolve the target quality for this file. Preset mode returns the fixed
     // value instantly; VMAF mode searches (or reuses a cached CRF) for the

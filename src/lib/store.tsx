@@ -36,6 +36,9 @@ export interface ActiveFile {
   bitrateKbps: number | null;
   /** Recent projected final sizes, for the trend indicator. */
   projections: number[];
+  /** Deep health-gate source-decode progress (0–1) before the encode; null when
+   *  not checking (Off/Structural gate, or once the check has passed). */
+  healthFrac: number | null;
   /** VMAF-mode quality resolution, e.g. "VMAF 95 → CRF 32". Null in preset mode. */
   qualityNote: string | null;
   /** VMAF sample-search progress (0–1) before the real encode; null when not
@@ -87,6 +90,7 @@ type Action =
   | { type: "RUN_START"; minSavings: number; total: number }
   | { type: "FILE_START"; path: string; name: string; duration: number | null; srcSize: number }
   | { type: "FILE_PROGRESS"; p: FileProgress }
+  | { type: "HEALTH_CHECK"; p: QualityProgress }
   | { type: "QUALITY_PROGRESS"; p: QualityProgress }
   | { type: "QUALITY_RESOLVED"; p: QualityResolved }
   | { type: "FILE_END"; path: string }
@@ -162,6 +166,7 @@ function reducer(state: State, action: Action): State {
             speed: null,
             bitrateKbps: null,
             projections: [],
+            healthFrac: null,
             qualityNote: null,
             searchFrac: null,
             searchStartedAt: null,
@@ -169,6 +174,17 @@ function reducer(state: State, action: Action): State {
           },
         },
       };
+    case "HEALTH_CHECK": {
+      const f = state.active[action.p.path];
+      if (!f) return state;
+      // Hold just under 1 so the bar reads as "still checking" until the encode
+      // (or VMAF search) takes over.
+      const frac = Math.min(action.p.frac, 0.99);
+      return {
+        ...state,
+        active: { ...state.active, [action.p.path]: { ...f, healthFrac: frac } },
+      };
+    }
     case "FILE_PROGRESS": {
       const f = state.active[action.p.path];
       if (!f) return state;
@@ -192,7 +208,9 @@ function reducer(state: State, action: Action): State {
             speed: action.p.speed,
             bitrateKbps: action.p.bitrate_kbps,
             projections,
-            // A real encode tick means the search is over; hand the bar back.
+            // A real encode tick means the health check + search are over; hand
+            // the bar back to the encode.
+            healthFrac: null,
             searchFrac: null,
             searchEta: null,
           },
@@ -220,7 +238,14 @@ function reducer(state: State, action: Action): State {
         ...state,
         active: {
           ...state.active,
-          [action.p.path]: { ...f, searchFrac: frac, searchStartedAt: startedAt, searchEta: eta },
+          [action.p.path]: {
+            ...f,
+            // The VMAF search runs after the health gate; clear the health bar.
+            healthFrac: null,
+            searchFrac: frac,
+            searchStartedAt: startedAt,
+            searchEta: eta,
+          },
         },
       };
     }
@@ -332,6 +357,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           srcSize: p.src_size,
         }),
       onFileProgress: (p) => dispatch({ type: "FILE_PROGRESS", p }),
+      onGateProgress: (p) => dispatch({ type: "HEALTH_CHECK", p }),
       onQualityProgress: (p) => dispatch({ type: "QUALITY_PROGRESS", p }),
       onQualityResolved: (p) => dispatch({ type: "QUALITY_RESOLVED", p }),
       onFileEnd: (p) => dispatch({ type: "FILE_END", path: p.path }),

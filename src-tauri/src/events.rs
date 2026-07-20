@@ -19,6 +19,9 @@ pub const EV_RUN_DONE: &str = "sqz-run-done";
 pub const EV_PROJECTION: &str = "sqz-projection";
 /// Progress through the VMAF sample-encode search for a file (before its encode).
 pub const EV_QUALITY_PROGRESS: &str = "sqz-quality-progress";
+/// Progress decoding a source through the in-run health gate (Deep), before its
+/// encode. Distinct from `EV_HEALTH_PROGRESS` (the standalone library scan).
+pub const EV_GATE_PROGRESS: &str = "sqz-gate-progress";
 /// VMAF quality mode resolved a per-title CRF for a file (before its full encode).
 pub const EV_QUALITY_RESOLVED: &str = "sqz-quality-resolved";
 /// Per-file progress during a library health scan.
@@ -58,6 +61,13 @@ pub struct FileEnd {
 pub struct QualityProgress {
     pub path: String,
     /// Search progress, 0.0–1.0.
+    pub frac: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GateProgress {
+    pub path: String,
+    /// Health-check decode progress, 0.0–1.0.
     pub frac: f64,
 }
 
@@ -117,6 +127,16 @@ impl Reporter for TauriReporter {
         let _ = self.app.emit(
             EV_QUALITY_PROGRESS,
             QualityProgress {
+                path: path.to_string(),
+                frac,
+            },
+        );
+    }
+
+    fn on_health_progress(&self, path: &str, frac: f64) {
+        let _ = self.app.emit(
+            EV_GATE_PROGRESS,
+            GateProgress {
                 path: path.to_string(),
                 frac,
             },

@@ -22,6 +22,7 @@ export const EV = {
   runDone: "sqz-run-done",
   qualityProgress: "sqz-quality-progress",
   qualityResolved: "sqz-quality-resolved",
+  gateProgress: "sqz-gate-progress",
   projection: "sqz-projection",
   healthProgress: "sqz-health-progress",
   healthDone: "sqz-health-done",
@@ -45,6 +46,9 @@ export interface EngineHandlers {
   onFileEnd?: (p: FileEnd) => void;
   onQualityProgress?: (p: QualityProgress) => void;
   onQualityResolved?: (p: QualityResolved) => void;
+  /** Health-gate (Deep) source-decode progress, before the encode. Same
+   *  `{ path, frac }` shape as a quality-search tick. */
+  onGateProgress?: (p: QualityProgress) => void;
   onRecord?: (p: ProcessResult) => void;
   onRunStart?: (total: number) => void;
   onRunDone?: (p: RunSummary) => void;
@@ -58,6 +62,7 @@ export async function subscribeEngine(h: EngineHandlers): Promise<UnlistenFn> {
     listen<FileEnd>(EV.fileEnd, (e) => h.onFileEnd?.(e.payload)),
     listen<QualityProgress>(EV.qualityProgress, (e) => h.onQualityProgress?.(e.payload)),
     listen<QualityResolved>(EV.qualityResolved, (e) => h.onQualityResolved?.(e.payload)),
+    listen<QualityProgress>(EV.gateProgress, (e) => h.onGateProgress?.(e.payload)),
     listen<ProcessResult>(EV.fileRecord, (e) => h.onRecord?.(e.payload)),
     listen<{ total: number }>(EV.runStart, (e) => h.onRunStart?.(e.payload.total)),
     listen<RunSummary>(EV.runDone, (e) => h.onRunDone?.(e.payload)),

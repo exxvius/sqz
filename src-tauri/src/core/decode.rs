@@ -15,6 +15,7 @@ use std::path::Path;
 use std::process::Stdio;
 
 use super::config::{VerifyDepth, DECODE_PROBE_SECONDS};
+use super::encode::{run_encode, ProgressSample};
 use super::util::command_no_window;
 
 /// Decode one segment of `path` to null, catching corruption. `seek_from_end`
@@ -128,6 +129,147 @@ pub fn decode_probe(ffmpeg: &Path, path: &Path, depth: VerifyDepth) -> (bool, St
                 return (false, format!("tail: {detail}"));
             }
             (true, String::new())
+        }
+    }
+}
+
+/// Flatten an ffmpeg stderr tail into a compact single-line excerpt (last 400
+/// chars) for a health-gate failure detail.
+fn flatten_tail(tail: &str) -> String {
+    let flat = tail.replace('\n', " ");
+    let flat = flat.trim();
+    let skip = flat.chars().count().saturating_sub(400);
+    flat.chars()
+        .skip(skip)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// Decode one segment while reporting smooth progress. Same command shape as
+/// [`decode_segment`] (so the verdict matches), but routed through
+/// [`run_encode`] for `-progress` parsing and prompt cancellation. `seg_len` is
+/// the segment's expected seconds; observed `out_time` maps into the overall
+/// `[base, base+span]` slice of the 0–1 bar. The null muxer writes to the OS null
+/// device (not stdout) so `-progress pipe:1` has stdout to itself.
+#[allow(clippy::too_many_arguments)]
+fn decode_segment_progress(
+    ffmpeg: &Path,
+    path: &Path,
+    seek_from_end: Option<u32>,
+    limit: Option<u32>,
+    seg_len: f64,
+    base: f64,
+    span: f64,
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_progress: &(dyn Fn(f64) + Sync),
+) -> (bool, String) {
+    let null_sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let mut args: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-nostdin".into(),
+        "-v".into(),
+        "error".into(),
+        "-xerror".into(),
+    ];
+    if let Some(sec) = seek_from_end {
+        args.push("-sseof".into());
+        args.push(format!("-{sec}"));
+    }
+    args.push("-i".into());
+    args.push(path.to_string_lossy().into_owned());
+    if let Some(sec) = limit {
+        args.push("-t".into());
+        args.push(sec.to_string());
+    }
+    // A tail seek lands mid-frame in compressed audio; drop audio so a benign
+    // partial audio frame isn't a false DecodeError (same rule as decode_segment).
+    if seek_from_end.is_some() {
+        args.push("-an".into());
+    }
+    args.push("-progress".into());
+    args.push("pipe:1".into());
+    args.push("-nostats".into());
+    args.push("-f".into());
+    args.push("null".into());
+    args.push(null_sink.into());
+
+    let mut cb = |s: ProgressSample| {
+        let within = if seg_len > 0.0 {
+            (s.sec / seg_len).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        on_progress(base + span * within);
+    };
+    let res = run_encode(ffmpeg, &args, cancel, &mut cb, None);
+    if res.returncode == Some(0) {
+        return (true, String::new());
+    }
+    let detail = flatten_tail(&res.stderr_tail);
+    if detail.is_empty() {
+        (false, format!("rc={:?}", res.returncode))
+    } else {
+        (false, detail)
+    }
+}
+
+/// Like [`decode_probe`] but reports a smooth 0–1 progress fraction as it decodes
+/// and honors `cancel`. Used by the pre-encode health gate so the Live card shows
+/// a real progress bar while the source is checked. Same segments and verdicts as
+/// `decode_probe` — the shared detector stays authoritative. `duration` (seconds)
+/// scales the bar for full-decode depths; the `Fast` head+tail split maps each
+/// half of the bar.
+pub fn decode_probe_progress(
+    ffmpeg: &Path,
+    path: &Path,
+    depth: VerifyDepth,
+    duration: Option<f64>,
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_progress: &(dyn Fn(f64) + Sync),
+) -> (bool, String) {
+    let n = DECODE_PROBE_SECONDS as f64;
+    match depth {
+        VerifyDepth::Fast => {
+            let (ok, detail) = decode_segment_progress(
+                ffmpeg,
+                path,
+                None,
+                Some(DECODE_PROBE_SECONDS),
+                n,
+                0.0,
+                0.5,
+                cancel,
+                on_progress,
+            );
+            if !ok {
+                return (false, format!("head: {detail}"));
+            }
+            let (ok, detail) = decode_segment_progress(
+                ffmpeg,
+                path,
+                Some(DECODE_PROBE_SECONDS),
+                None,
+                n,
+                0.5,
+                0.5,
+                cancel,
+                on_progress,
+            );
+            if !ok {
+                return (false, format!("tail: {detail}"));
+            }
+            on_progress(1.0);
+            (true, String::new())
+        }
+        // Full-decode depths aren't used by the gate (it always checks Fast). Keep
+        // verdict parity by delegating to the authoritative `decode_probe`, and
+        // just fill the bar on completion — no per-frame progress for these.
+        VerifyDepth::Thorough | VerifyDepth::Checksummed => {
+            let _ = duration;
+            let r = decode_probe(ffmpeg, path, depth);
+            on_progress(1.0);
+            r
         }
     }
 }

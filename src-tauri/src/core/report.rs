@@ -80,6 +80,10 @@ pub trait Reporter: Send + Sync {
     /// Progress through the VMAF sample-encode search for `path`, before the real
     /// encode: a fraction 0.0–1.0 that advances continuously. Only fired in VMAF mode.
     fn on_search_progress(&self, path: &str, frac: f64);
+    /// Progress decoding `path` through the pre-encode health gate (Deep gate
+    /// only), before the encode: a fraction 0.0–1.0. Lets the Live card show a
+    /// real bar while the source is checked instead of stalling on a blank panel.
+    fn on_health_progress(&self, path: &str, frac: f64);
     /// VMAF mode resolved a per-title CRF for `path` before the full encode.
     /// `vmaf` is the measured score at `crf`, or `None` on a cache hit (no fresh
     /// measurement). Only fired in VMAF quality mode.
@@ -123,6 +127,7 @@ impl Reporter for NoopReporter {
     fn on_file_start(&self, _: &str, _: &str, _: Option<f64>, _: u64) {}
     fn on_file_progress(&self, _: &str, _: super::encode::ProgressSample) {}
     fn on_search_progress(&self, _: &str, _: f64) {}
+    fn on_health_progress(&self, _: &str, _: f64) {}
     fn on_quality_resolved(&self, _: &str, _: f64, _: i32, _: Option<f64>) {}
     fn on_file_end(&self, _: &str) {}
     fn on_record(&self, _: &ProcessResult) {}

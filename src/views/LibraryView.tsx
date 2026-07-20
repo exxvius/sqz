@@ -97,6 +97,22 @@ export function LibraryView({ config }: { config: RunConfig }) {
     wasScanning.current = scanning;
   }, [scanning, refresh]);
 
+  // A gated run records each file's health the moment it finishes (healthy after
+  // its encode verifies; unhealthy the moment the gate rejects it). Poll while a
+  // run is active so those rows/counts stream into the Library live, and pull once
+  // more when the run ends to catch the final files.
+  const running = store.running;
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(refresh, 1500);
+    return () => window.clearInterval(id);
+  }, [running, refresh]);
+  useEffect(() => {
+    if (wasRunning.current && !running) refresh();
+    wasRunning.current = running;
+  }, [running, refresh]);
+
   const addFolders = async () => {
     const picked = await pickInputs(true);
     if (picked.length === 0) return;

@@ -60,7 +60,12 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
     <div>
       {active.map((f) => {
         const d = projify(f, minSavings);
-        const searching = f.searchFrac != null;
+        const checkingHealth = f.healthFrac != null;
+        const searching = !checkingHealth && f.searchFrac != null;
+        // The pre-encode bar (health check, then any VMAF search) drives the bar
+        // and hides the encode stats until the real encode starts.
+        const preEncode = checkingHealth || searching;
+        const preFrac = checkingHealth ? (f.healthFrac ?? 0) : (f.searchFrac ?? 0);
         return (
           <div className="live-card" key={f.path}>
             <div className="live-top">
@@ -74,7 +79,9 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
               )}
             </div>
 
-            {searching ? (
+            {checkingHealth ? (
+              <div className="live-quality">Checking health… {pct(f.healthFrac ?? 0)}</div>
+            ) : searching ? (
               <div className="live-quality">
                 Finding best quality… {pct(f.searchFrac ?? 0)}
                 {f.searchEta != null && ` · ~${fmtDuration(f.searchEta)} left`}
@@ -85,12 +92,12 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
 
             <div
               className="bar tall"
-              style={{ "--p": searching ? (f.searchFrac ?? 0) : d.progress } as CSSProperties}
+              style={{ "--p": preEncode ? preFrac : d.progress } as CSSProperties}
             >
-              <span className={searching ? "" : d.klass} />
+              <span className={preEncode ? "" : d.klass} />
             </div>
 
-            {searching ? null : (
+            {preEncode ? null : (
             <div className="live-stats">
               <Stat k="progress" v={pct(d.progress)} />
               <Stat k="source" v={humanBytes(f.srcSize)} />
