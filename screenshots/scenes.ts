@@ -377,7 +377,34 @@ export const scenes: Record<string, (emit: Emit) => Promise<void>> = {
   dashboard: async (emit) => {
     await emit("sqz-run-start", { total: 142 });
 
-    // Already-processed files this run → fills the meter, stat row, event log.
+    // A nearly-finished run: emit a bulk of already-processed files so the meter,
+    // stat row, and queue read as 135 / 142 processed with 3 still in flight.
+    // Counts here (115+5+7+2) plus the six curated records below sum to 135:
+    // done 118, normalized 6, skipped 8, failed 3.
+    let k = 0;
+    const bulkPath = (i: number) => {
+      const show = SHOWS[i % SHOWS.length];
+      const season = 1 + Math.floor(i / 24);
+      const ep = 1 + (i % 24);
+      const h = GEN_RES[i % GEN_RES.length];
+      const s = String(season).padStart(2, "0");
+      const e = String(ep).padStart(2, "0");
+      return `D:\\Media\\TV\\${show}\\S${s}E${e} ${h}p.mkv`;
+    };
+    for (let i = 0; i < 115; i++) {
+      const orig = Math.round((3 + (i % 9) * 0.6) * GB);
+      const out = Math.round(orig * (0.4 + (i % 5) * 0.03));
+      await record(emit, bulkPath(k++), "done", orig, out, orig - out, "AV1 · NVENC · verified");
+    }
+    for (let i = 0; i < 5; i++) {
+      const orig = Math.round((1.1 + (i % 3) * 0.2) * GB);
+      const out = Math.round(orig * 0.98);
+      await record(emit, bulkPath(k++), "normalized", orig, out, orig - out, "Remuxed to MKV");
+    }
+    for (let i = 0; i < 7; i++) await record(emit, bulkPath(k++), "skipped_efficient", null, null, 0, "Already efficient");
+    for (let i = 0; i < 2; i++) await record(emit, bulkPath(k++), "failed", null, null, 0, "ffprobe: moov atom not found — file is truncated or still being written");
+
+    // Curated recent files — emitted last, so they head the event log.
     await record(emit, "D:\\Media\\Movies\\Blade Runner 2049 (2017) 2160p HDR.mkv", "done", Math.round(38.4 * GB), Math.round(15.1 * GB), Math.round(23.3 * GB), "AV1 · NVENC · verified");
     await record(emit, "D:\\Media\\Movies\\Dune Part Two (2024) 2160p.mkv", "done", Math.round(41.2 * GB), Math.round(17.6 * GB), Math.round(23.6 * GB), "AV1 · NVENC · verified");
     await record(emit, "D:\\Media\\Movies\\Sintel (2010) 1080p.mkv", "done", Math.round(1.12 * GB), Math.round(438 * MB), Math.round(0.69 * GB), "AV1 · NVENC · verified");

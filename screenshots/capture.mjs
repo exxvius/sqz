@@ -1,5 +1,7 @@
-// Drives the mocked harness in headless Chromium and writes PNGs to docs/images.
-// Usage: node screenshots/capture.mjs   (dev server must be running on :1420)
+// Captures the full-window hero shots (the live dashboard, light + dark) that head
+// the README. The per-feature marketing panels are composed separately — see
+// marketing.mjs. Both need the dev server running on :1420.
+// Usage: node screenshots/capture.mjs
 
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
@@ -8,19 +10,8 @@ const BASE = "http://localhost:1420/screenshots/harness.html";
 const OUT = "docs/images";
 
 const SHOTS = [
-  { scene: "dashboard", theme: "dark", file: "dashboard-dark.png", nav: "Live", wait: ".live-card" },
-  // Live tab scrolled to the in-flight encodes (glowing progress bars mid-run).
-  { scene: "dashboard", theme: "dark", file: "live-encodes-dark.png", nav: "Live", wait: ".live-card", scrollTo: ".card.card-flat" },
-  // Same view, locked: personal paths masked and controls read-only.
-  { scene: "dashboard", theme: "dark", file: "live-locked-dark.png", nav: "Live", wait: ".live-card", scrollTo: ".card.card-flat", locked: true },
-  { scene: "history", theme: "dark", file: "history-dark.png", nav: "History", wait: ".kv-grid" },
-  // Home with the reclaimable-space estimate loaded (Tier-2 projection in).
-  { scene: "home", theme: "dark", file: "home-dark.png", nav: null, add: "folders", wait: ".ab-toggle" },
-  // Home with the per-bucket breakdown expanded.
-  { scene: "home", theme: "dark", file: "home-breakdown-dark.png", nav: null, add: "folders", wait: ".ab-toggle", expandBreakdown: true },
-  // Settings with a non-default accent to show the theming.
-  { scene: "home", theme: "dark", file: "settings-violet-dark.png", nav: "Settings", wait: ".card", accent: "violet" },
-  { scene: "dashboard", theme: "light", file: "dashboard-light.png", nav: "Live", wait: ".live-card" },
+  { theme: "dark", file: "dashboard-dark.png" },
+  { theme: "light", file: "dashboard-light.png" },
 ];
 
 await mkdir(OUT, { recursive: true });
@@ -33,30 +24,13 @@ const ctx = await browser.newContext({
 
 for (const s of SHOTS) {
   const page = await ctx.newPage();
-  // Inject the accent before the app boots (default emerald, isolating shots
-  // from each other in the shared context).
-  await page.addInitScript((a) => localStorage.setItem("sqz-accent", a), s.accent ?? "emerald");
-
-  const url = `${BASE}?scene=${s.scene}&theme=${s.theme}${s.locked ? "&locked=1" : ""}`;
-  await page.goto(url, { waitUntil: "load", timeout: 20000 });
+  await page.addInitScript(() => localStorage.setItem("sqz-accent", "emerald"));
+  await page.goto(`${BASE}?scene=dashboard&theme=${s.theme}`, { waitUntil: "load", timeout: 20000 });
   await page.waitForFunction(() => window.sqz && window.sqz.ready);
   await page.evaluate(() => window.sqz.runScene());
-
-  if (s.nav) await page.getByRole("button", { name: s.nav, exact: true }).click();
-  if (s.add) {
-    const label = s.add === "folders" ? "Add folders" : "Add files";
-    await page.getByRole("button", { name: label, exact: true }).click();
-  }
-
-  await page.waitForSelector(s.wait, { timeout: 8000 });
-  if (s.expandBreakdown) {
-    await page.locator(".ab-toggle").click();
-    await page.waitForSelector(".reclaim-table", { timeout: 8000 });
-  }
-  if (s.scrollTo) {
-    await page.locator(s.scrollTo).first().scrollIntoViewIfNeeded();
-  }
-  await page.waitForTimeout(700); // let bars/animations settle
+  await page.getByRole("button", { name: "Live", exact: true }).click();
+  await page.waitForSelector(".live-card", { timeout: 8000 });
+  await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/${s.file}` });
   console.log(`✓ ${s.file}`);
   await page.close();

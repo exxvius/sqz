@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/banner.png" alt="sqz — bulk re-encode your library to modern codecs, reclaim disk space, never lose a file" width="100%">
+<img src="docs/images/banner.png" alt="sqz: bulk re-encode your library to modern codecs and reclaim disk space without losing a file" width="100%">
 <br><br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/exxvius/sqz/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/exxvius/sqz/actions/workflows/ci.yml)
@@ -10,13 +10,18 @@
 
 </div>
 
-sqz bulk re-encodes your videos to AV1, HEVC, or H.264 and replaces each original
-with the smaller copy — but only after verifying that copy plays, matches the
-source duration, and is meaningfully smaller. If a check fails, the original is
-left untouched.
+sqz re-encodes your video library to a modern codec (AV1, HEVC, or H.264) and gives
+you the disk space back. Point it at a few files or a whole folder, say how hard to
+compress, and it grinds through them.
 
-~6 MB download, no command line. FFmpeg isn't bundled; sqz downloads it on first
-run, or uses a copy you already have.
+The thing it really cares about is not losing your originals. An original only gets
+replaced once the new copy has proven it plays, runs the full length of the source,
+and comes out smaller. If an encode can't clear that bar, sqz leaves the file alone
+and moves on.
+
+The download is about 6 MB and there's no command line to learn. FFmpeg isn't
+bundled: sqz fetches it the first time you run it, or you can point it at a build you
+already have.
 
 <div align="center">
   <picture>
@@ -26,51 +31,73 @@ run, or uses a copy you already have.
   </picture>
 </div>
 
-## How a file gets replaced
+## How a replacement actually happens
 
-Nothing destructive happens until the new file has earned it:
+A bad encode should never cost you a file, so the swap only happens at the very end,
+after the new copy has earned it:
 
-1. **Probe** with ffprobe. Unreadable files are logged as failed and skipped.
-2. **Skip** files already in the target codec at or below the height cap.
-3. **Encode** to a scratch folder on the same volume — the original is never
-   written to.
-4. **Verify**: the output must parse, match the source duration (±1 s), decode
-   without errors, and be at least 10% smaller (configurable). Otherwise the
-   original is kept.
-5. **Swap** with a same-volume rename, then send the original to the Recycle Bin /
-   Trash, a holding folder, or permanent deletion.
-6. **Record** the outcome to a SQLite manifest — this is what makes runs
-   resumable and populates the History tab.
+1. **Probe** the source with ffprobe. If it won't read, it's marked failed and skipped.
+2. **Skip** files already in your target codec at or below the height cap. Nothing to gain there.
+3. **Encode** into a scratch folder on the same drive. The original is never written to.
+4. **Verify** the output. It has to parse, land within a second of the source duration, decode clean, and be at least 10% smaller (that number is yours to change). Miss any of those and the original is kept.
+5. **Swap** with a same-volume rename, then send the original to the Recycle Bin, a holding folder, or delete it, whichever you picked.
+6. **Record** the outcome in a SQLite manifest. That is what makes a run resumable, and what the History tab reads from.
 
-## Screenshots
+## Features
 
-<p align="center">
-  <img src="docs/images/home-dark.png" alt="Home: sources, codec and quality presets, and a live reclaimable-space estimate" width="49%">
-  &nbsp;
-  <img src="docs/images/home-breakdown-dark.png" alt="Home: reclaimable-space projection broken down by codec and resolution before you run" width="49%">
-</p>
-<p align="center">
-  <img src="docs/images/history-dark.png" alt="History: reclaimed space, filters, per-file results" width="49%">
-  &nbsp;
-  <img src="docs/images/live-encodes-dark.png" alt="Live: in-flight encodes with per-file progress, projected savings, speed, and ETA" width="49%">
-</p>
-<p align="center">
-  <img src="docs/images/live-locked-dark.png" alt="Live, locked: personal paths masked and controls read-only while the app is locked" width="49%">
-  &nbsp;
-  <img src="docs/images/settings-violet-dark.png" alt="Settings: recolorable accent theming (Violet shown), bundled FFmpeg, and data controls" width="49%">
-</p>
-
-## Hardware & quality
-
-sqz uses your GPU encoder when it can — NVENC (NVIDIA), AMF (AMD), QSV (Intel),
-VideoToolbox (Apple) — and falls back to software (SVT-AV1, x265, x264) otherwise.
-Pick a target (*Maximum savings*, *Balanced*, *High quality*, *Visually lossless*)
-and sqz maps it to encoder settings; every option is exposed under **Advanced**.
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <strong>See your savings before you run</strong><br><br>
+      <img src="docs/images/feature-projection.png" alt="Reclaimable space broken down by codec and resolution" width="100%">
+    </td>
+    <td width="50%" align="center" valign="top">
+      <strong>Watch every encode live</strong><br><br>
+      <img src="docs/images/feature-live.png" alt="Several files encoding in parallel, each with live stats" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <strong>Codec and quality presets</strong><br><br>
+      <img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="100%">
+    </td>
+    <td width="50%" align="center" valign="top">
+      <strong>Uses your GPU</strong><br><br>
+      <img src="docs/images/feature-encoders.png" alt="Detected hardware encoders per codec" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <strong>Searchable history of every file</strong><br><br>
+      <img src="docs/images/feature-history.png" alt="History with reclaimed totals and per-run stats" width="100%">
+    </td>
+    <td width="50%" align="center" valign="top">
+      <strong>Lock it and walk away</strong><br><br>
+      <img src="docs/images/feature-locked.png" alt="Locked mode with masked names and the unlock prompt" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center" valign="top">
+      <strong>Originals go where you tell them</strong><br><br>
+      <img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="50%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <strong>Seventeen accent colors</strong><br><br>
+      <img src="docs/images/feature-accents.png" alt="The Live page sliced into ten accents" width="100%">
+    </td>
+    <td width="50%" align="center" valign="top">
+      <strong>Light and dark themes</strong><br><br>
+      <img src="docs/images/feature-theme.png" alt="The Home screen split into dark and light" width="100%">
+    </td>
+  </tr>
+</table>
 
 ## Building from source
 
-Requires the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/)
-(Rust, Node.js, platform webview libraries).
+You'll need the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/):
+Rust, Node.js, and your platform's webview libraries.
 
 ```bash
 npm install
@@ -79,12 +106,12 @@ npm run tauri dev
 npm run tauri build                          # portable, self-contained package
 ```
 
-The engine (probe, encode, verify, swap, manifest) is Rust; the UI is React on
-Tauri v2. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The engine (probe, encode, verify, swap, manifest) is Rust. The UI is React running
+on Tauri v2. There's more in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 
-MIT ([LICENSE](LICENSE)). The FFmpeg build sqz downloads is GPL and lives beside
-the app in its data folder — never bundled or linked into the binary. See
-[NOTICE](NOTICE). FFmpeg is a trademark of Fabrice Bellard; sqz is not affiliated
-with the FFmpeg project.
+sqz is MIT licensed; see [LICENSE](LICENSE). It doesn't bundle or link FFmpeg. The
+GPL build it downloads sits next to the app in its data folder, and [NOTICE](NOTICE)
+spells out what that means. FFmpeg is a trademark of Fabrice Bellard, and sqz isn't
+affiliated with the FFmpeg project.
