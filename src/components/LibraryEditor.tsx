@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AddFolderIcon, RemoveXIcon, SaveIcon } from "./icons";
+import { AddFolderIcon, RemoveXIcon } from "./icons";
 import { pickInputs } from "../lib/api";
 import type { RunConfig, SavedLibrary } from "../lib/types";
 import { AdvancedOptions } from "./AdvancedOptions";
@@ -127,7 +127,7 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
             Cancel
           </button>
           <button className="btn primary" onClick={save} disabled={!canSave}>
-            <SaveIcon /> {saving ? "Saving…" : "Save library"}
+            {saving ? "Saving…" : "Save library"}
           </button>
         </div>
       </div>
