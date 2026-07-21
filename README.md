@@ -47,10 +47,6 @@ after the new copy has earned it:
 
 <div align="center">
 
-### Save libraries, re-run them anytime
-<img src="docs/images/feature-libraries.png" alt="Named libraries, each with its own encode profile, ready to re-run or health-check in one click" width="90%">
-<br><br><br>
-
 ### Codec and quality presets
 <img src="docs/images/feature-presets.png" alt="AV1, HEVC and H.264 with four quality presets" width="90%">
 <br><br><br>
@@ -64,7 +60,11 @@ after the new copy has earned it:
 <br><br><br>
 
 ### Originals go where you tell them
-<img src="docs/images/feature-disposal.png" alt="Recycle Bin, a holding folder, or deletion" width="90%">
+<img src="docs/images/feature-disposal.png" alt="Keep both, a holding folder, the Recycle Bin, or deletion" width="90%">
+<br><br><br>
+
+### Save libraries, re-run them anytime
+<img src="docs/images/feature-libraries.png" alt="Named libraries, each with its own encode profile, ready to re-run or health-check in one click" width="90%">
 <br><br><br>
 
 ### Watch every encode live

@@ -414,7 +414,7 @@ async function savedLibraries() {
   const panel = await grab(page, ".card.card-flat", { index: 0, opaque: true });
   // Open the Home-videos library's editor to capture a populated edit modal
   // (two folders, preset mode, no downscaling — the memory-preserving profile).
-  await page.locator(".lib-row", { hasText: "Home videos" }).getByRole("button", { name: "Edit", exact: true }).click();
+  await page.locator(".lib-row", { hasText: "Home videos" }).getByRole("button", { name: "Edit library", exact: true }).click();
   await page.waitForSelector(".lib-editor", { timeout: 8000 });
   await page.waitForTimeout(300);
   const modal = await grab(page, ".lib-editor", { opaque: true });
