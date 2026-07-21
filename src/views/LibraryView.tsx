@@ -3,10 +3,13 @@ import { StatusCard } from "../components/StatusCard";
 import { useConfirm } from "../components/ConfirmModal";
 import { LibraryEditor } from "../components/LibraryEditor";
 import {
+  CancelIcon,
   DeepScanIcon,
+  EditIcon,
   FolderIcon,
   NewLibraryIcon,
   PlayIcon,
+  RemoveIcon,
   SearchIcon,
 } from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
@@ -66,6 +69,8 @@ export function LibraryView({ goDashboard }: Props) {
   // Which saved library's scan is in flight, so its progress shows inline in that
   // row (there's only ever one scan at a time). Cleared when scanning stops.
   const [scanningId, setScanningId] = useState<string | null>(null);
+  // Which library row is showing the quick/deep scan choice (after clicking Scan).
+  const [scanChoiceId, setScanChoiceId] = useState<string | null>(null);
 
   const refreshLibraries = useCallback(() => {
     api.listLibraries().then(setLibraries);
@@ -129,6 +134,7 @@ export function LibraryView({ goDashboard }: Props) {
   };
   const scanLibrary = (lib: SavedLibrary, deep: boolean) => {
     if (scanning) return;
+    setScanChoiceId(null);
     setScanningId(lib.id);
     store.startScan({ ...lib.profile, inputs: lib.roots }, deep);
   };
@@ -277,25 +283,17 @@ export function LibraryView({ goDashboard }: Props) {
                           onClick={() => store.cancelScan()}
                           title="Stop this scan"
                         >
-                          ✕ Cancel
+                          <CancelIcon /> Cancel
                         </button>
-                      ) : (
+                      ) : scanChoiceId === lib.id ? (
                         <>
-                          <button
-                            className="mini-btn"
-                            onClick={() => runLibrary(lib)}
-                            disabled={store.running || scanning || lib.roots.length === 0}
-                            title="Encode this library with its profile"
-                          >
-                            <PlayIcon /> Run
-                          </button>
                           <button
                             className="mini-btn"
                             onClick={() => scanLibrary(lib, false)}
                             disabled={scanning || lib.roots.length === 0}
-                            title="Health-scan this library's folders"
+                            title="Structural health scan (fast)"
                           >
-                            <SearchIcon /> Scan
+                            <SearchIcon /> Quick scan
                           </button>
                           <button
                             className="mini-btn"
@@ -305,11 +303,49 @@ export function LibraryView({ goDashboard }: Props) {
                           >
                             <DeepScanIcon /> Deep scan
                           </button>
-                          <button className="mini-btn" onClick={() => setEditing(lib)}>
-                            Edit
+                          <button
+                            className="mini-btn"
+                            onClick={() => setScanChoiceId(null)}
+                            title="Back"
+                          >
+                            <CancelIcon /> Cancel
                           </button>
-                          <button className="mini-btn danger" onClick={() => removeLibrary(lib)}>
-                            ✕
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="mini-btn"
+                            onClick={() => runLibrary(lib)}
+                            disabled={store.running || scanning || lib.roots.length === 0}
+                            title="Encode this library with its profile"
+                            aria-label="Run"
+                          >
+                            <PlayIcon />
+                          </button>
+                          <button
+                            className="mini-btn"
+                            onClick={() => setScanChoiceId(lib.id)}
+                            disabled={scanning || lib.roots.length === 0}
+                            title="Health-scan this library"
+                            aria-label="Scan"
+                          >
+                            <SearchIcon />
+                          </button>
+                          <button
+                            className="mini-btn"
+                            onClick={() => setEditing(lib)}
+                            title="Edit library"
+                            aria-label="Edit library"
+                          >
+                            <EditIcon />
+                          </button>
+                          <button
+                            className="mini-btn danger"
+                            onClick={() => removeLibrary(lib)}
+                            title="Delete this library"
+                            aria-label="Delete library"
+                          >
+                            <RemoveIcon />
                           </button>
                         </>
                       )}
@@ -398,7 +434,7 @@ export function LibraryView({ goDashboard }: Props) {
               onClick={removeShown}
               title="Remove the shown files from the health list (keeps encode history)"
             >
-              ✕ Remove {allRows.length} from library
+              <RemoveIcon /> Remove {allRows.length} from library
             </button>
           )}
         </div>
@@ -416,14 +452,29 @@ export function LibraryView({ goDashboard }: Props) {
             const filePath = currentPath(r.path, encoded, r.out_ext);
             const actions = locked ? null : (
               <>
-                <button className="mini-btn" onClick={() => openFile(filePath)}>
-                  <PlayIcon /> Open
+                <button
+                  className="mini-btn"
+                  onClick={() => openFile(filePath)}
+                  title="Open"
+                  aria-label="Open"
+                >
+                  <PlayIcon />
                 </button>
-                <button className="mini-btn" onClick={() => revealFile(filePath)}>
-                  <FolderIcon /> Folder
+                <button
+                  className="mini-btn"
+                  onClick={() => revealFile(filePath)}
+                  title="Show in folder"
+                  aria-label="Show in folder"
+                >
+                  <FolderIcon />
                 </button>
-                <button className="mini-btn danger" onClick={() => removeOne(r.path)}>
-                  ✕ Remove
+                <button
+                  className="mini-btn danger"
+                  onClick={() => removeOne(r.path)}
+                  title="Remove from library"
+                  aria-label="Remove from library"
+                >
+                  <RemoveIcon />
                 </button>
               </>
             );

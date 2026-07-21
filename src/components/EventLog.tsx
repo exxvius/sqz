@@ -1,5 +1,5 @@
 import { StatusCard } from "./StatusCard";
-import { FolderIcon, PlayIcon } from "./icons";
+import { FolderIcon, ForceIcon, PlayIcon, RetryIcon } from "./icons";
 import { openFile, revealFile } from "../lib/api";
 import type { LogEntry } from "../lib/store";
 import { currentPath, humanBytes } from "../lib/format";
@@ -37,22 +37,32 @@ export function EventLog({ log, onRetry, onForce }: Props) {
           <>
             {!isFail && (
               <>
-                <button className="mini-btn" onClick={() => openFile(filePath)}>
-                  <PlayIcon /> Open
+                <button
+                  className="mini-btn"
+                  onClick={() => openFile(filePath)}
+                  title="Open"
+                  aria-label="Open"
+                >
+                  <PlayIcon />
                 </button>
-                <button className="mini-btn" onClick={() => revealFile(filePath)}>
-                  <FolderIcon /> Folder
+                <button
+                  className="mini-btn"
+                  onClick={() => revealFile(filePath)}
+                  title="Show in folder"
+                  aria-label="Show in folder"
+                >
+                  <FolderIcon />
                 </button>
               </>
             )}
             {isFail && (
               <button className="mini-btn" onClick={() => onRetry(e.path)}>
-                ↻ Retry
+                <RetryIcon /> Retry
               </button>
             )}
             {isSkip && (
               <button className="mini-btn" onClick={() => onForce(e.path)}>
-                ⏵ Force process
+                <ForceIcon /> Force process
               </button>
             )}
           </>

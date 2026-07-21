@@ -1,19 +1,8 @@
-// Minimal stroked line icons (currentColor), 20×20 on a 24 viewBox.
+// Filled icons (currentColor) on a 24×24 viewBox.
 
 interface IconProps {
   size?: number;
 }
-
-const base = (size: number) => ({
-  width: size,
-  height: size,
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.8,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-});
 
 // Filled nav icons (currentColor) on a 24 viewBox.
 const filled = (size: number) => ({
@@ -61,6 +50,69 @@ export function NewLibraryIcon({ size = 18 }: IconProps) {
   return (
     <svg {...filled(size)}>
       <path d="M14.713 13.713Q15 13.425 15 13v-2h2q.425 0 .713-.288T18 10t-.288-.712T17 9h-2V7q0-.425-.288-.712T14 6t-.712.288T13 7v2h-2q-.425 0-.712.288T10 10t.288.713T11 11h2v2q0 .425.288.713T14 14t.713-.288M8 18q-.825 0-1.412-.587T6 16V4q0-.825.588-1.412T8 2h12q.825 0 1.413.588T22 4v12q0 .825-.587 1.413T20 18zm0-2h12V4H8zm-4 6q-.825 0-1.412-.587T2 20V7q0-.425.288-.712T3 6t.713.288T4 7v13h13q.425 0 .713.288T18 21t-.288.713T17 22zM8 4v12z" />
+    </svg>
+  );
+}
+
+/** Circular arrow — retry a failed file. */
+export function RetryIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M12 20q-3.35 0-5.675-2.325T4 12t2.325-5.675T12 4q1.725 0 3.3.712T18 6.75V4h2v7h-7V9h4.2q-.8-1.4-2.187-2.2T12 6Q9.5 6 7.75 7.75T6 12t1.75 4.25T12 18q1.925 0 3.475-1.1T17.65 14h2.1q-.7 2.65-2.85 4.325T12 20" />
+    </svg>
+  );
+}
+
+/** Double chevron — force a skipped file through an encode. */
+export function ForceIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M9.575 12L5 7.4L6.4 6l6 6l-6 6L5 16.6zm6.6 0L11.6 7.4L13 6l6 6l-6 6l-1.4-1.4z" />
+    </svg>
+  );
+}
+
+/** Counter-clockwise arrow around a dot — restore the original. */
+export function RestoreIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M12 14q-.825 0-1.412-.587T10 12t.588-1.412T12 10t1.413.588T14 12t-.587 1.413T12 14m0 7q-3.475 0-6.025-2.287T3.05 13H5.1q.35 2.6 2.313 4.3T12 19q2.925 0 4.963-2.037T19 12t-2.037-4.962T12 5q-1.725 0-3.225.8T6.25 8H9v2H3V4h2v2.35q1.275-1.6 3.113-2.475T12 3q1.875 0 3.513.713t2.85 1.924t1.925 2.85T21 12t-.712 3.513t-1.925 2.85t-2.85 1.925T12 21" />
+    </svg>
+  );
+}
+
+/** Trash can — remove a row from a list. */
+export function RemoveIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M7 21q-.825 0-1.412-.587T5 19V6H4V4h5V3h6v1h5v2h-1v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zM9 17h2V8H9zm4 0h2V8h-2zM7 6v13z" />
+    </svg>
+  );
+}
+
+/** Box with an out-arrow — export to a file. */
+export function ExportIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m5.05 22.375l-1.4-1.425L6.6 18H4.35v-2H10v5.65H8v-2.225zM12 22v-2h6V9h-5V4H6v10H4V4q0-.825.588-1.412T6 2h8l6 6v12q0 .825-.587 1.413T18 22z" />
+    </svg>
+  );
+}
+
+/** X in a circle — cancel an in-progress action. */
+export function CancelIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m8.4 17l3.6-3.6l3.6 3.6l1.4-1.4l-3.6-3.6L17 8.4L15.6 7L12 10.6L8.4 7L7 8.4l3.6 3.6L7 15.6zm3.6 5q-2.075 0-3.9-.788t-3.175-2.137T2.788 15.9T2 12t.788-3.9t2.137-3.175T8.1 2.788T12 2t3.9.788t3.175 2.137T21.213 8.1T22 12t-.788 3.9t-2.137 3.175t-3.175 2.138T12 22m0-2q3.35 0 5.675-2.325T20 12t-2.325-5.675T12 4T6.325 6.325T4 12t2.325 5.675T12 20m0-8" />
+    </svg>
+  );
+}
+
+/** Small X — remove an entry from a queue/list being built. */
+export function RemoveXIcon({ size = 14 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="m8.382 17.025l-1.407-1.4L10.593 12L6.975 8.4L8.382 7L12 10.615L15.593 7L17 8.4L13.382 12L17 15.625l-1.407 1.4L12 13.41z" />
     </svg>
   );
 }
@@ -214,18 +266,27 @@ export function SettingsIcon({ size = 18 }: IconProps) {
   );
 }
 
-export function FolderIcon({ size = 13 }: IconProps) {
+export function FolderIcon({ size = 15 }: IconProps) {
   return (
-    <svg {...base(size)}>
-      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    <svg {...filled(size)}>
+      <path d="M2 20V4h8l2 2h10v14zm2-2h16V8h-8.825l-2-2H4zm0 0V6z" />
     </svg>
   );
 }
 
-export function PlayIcon({ size = 13 }: IconProps) {
+export function PlayIcon({ size = 15 }: IconProps) {
   return (
-    <svg {...base(size)}>
-      <path d="M7 5.5 18 12 7 18.5Z" />
+    <svg {...filled(size)}>
+      <path d="M8 19V5l11 7zm2-3.65L15.25 12L10 8.65z" />
+    </svg>
+  );
+}
+
+/** Pencil — edit a saved library. */
+export function EditIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M5 19h1.425L16.2 9.225L14.775 7.8L5 17.575zm-2 2v-4.25L17.625 2.175L21.8 6.45L7.25 21zM19 6.4L17.6 5zm-3.525 2.125l-.7-.725L16.2 9.225z" />
     </svg>
   );
 }

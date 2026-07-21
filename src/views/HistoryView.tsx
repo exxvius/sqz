@@ -2,7 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { message, save } from "@tauri-apps/plugin-dialog";
 import { StatusCard } from "../components/StatusCard";
 import { useConfirm } from "../components/ConfirmModal";
-import { FolderIcon, PlayIcon } from "../components/icons";
+import {
+  ExportIcon,
+  FolderIcon,
+  ForceIcon,
+  PlayIcon,
+  RemoveIcon,
+  RestoreIcon,
+  RetryIcon,
+} from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
 import {
   currentPath,
@@ -89,19 +97,6 @@ export function HistoryView() {
     await api.deleteHistoryMatching(filter());
     refresh();
   };
-  const clearAll = async () => {
-    const ok = await confirm({
-      title: "Clear history",
-      message:
-        "Clear the entire history database? Every recorded file will be forgotten. This can't be undone.",
-      confirmLabel: "Clear all",
-      danger: true,
-    });
-    if (!ok) return;
-    await api.clearHistory();
-    refresh();
-  };
-
   const act = async (fn: Promise<unknown>) => {
     await fn;
     refresh();
@@ -243,13 +238,10 @@ export function HistoryView() {
           ) : (
             <>
               <button className="mini-btn" onClick={exportHistory}>
-                ⭳ Export
+                <ExportIcon /> Export
               </button>
               <button className="mini-btn danger" onClick={removeFiltered}>
-                Remove shown
-              </button>
-              <button className="mini-btn danger" onClick={clearAll}>
-                Clear all
+                <RemoveIcon /> Remove {allRows.length} shown
               </button>
             </>
           )}
@@ -268,34 +260,46 @@ export function HistoryView() {
               <>
                 {r.status !== "failed" && (
                   <>
-                    <button className="mini-btn" onClick={() => openFile(filePath)}>
-                      <PlayIcon /> Open
+                    <button
+                      className="mini-btn"
+                      onClick={() => openFile(filePath)}
+                      title="Open"
+                      aria-label="Open"
+                    >
+                      <PlayIcon />
                     </button>
-                    <button className="mini-btn" onClick={() => revealFile(filePath)}>
-                      <FolderIcon /> Folder
+                    <button
+                      className="mini-btn"
+                      onClick={() => revealFile(filePath)}
+                      title="Show in folder"
+                      aria-label="Show in folder"
+                    >
+                      <FolderIcon />
                     </button>
                   </>
                 )}
                 {retryable(r.status) && (
                   <button className="mini-btn" onClick={() => act(api.retryFile(r.path))}>
-                    ↻ Retry
+                    <RetryIcon /> Retry
                   </button>
                 )}
                 {forceable(r.status) && (
                   <button className="mini-btn" onClick={() => act(api.forceFile(r.path))}>
-                    ⏵ Force process
+                    <ForceIcon /> Force process
                   </button>
                 )}
                 {r.orig_path && (
                   <button className="mini-btn" onClick={() => restore(r.path)}>
-                    ↶ Restore original
+                    <RestoreIcon /> Restore original
                   </button>
                 )}
                 <button
                   className="mini-btn danger"
                   onClick={() => act(api.deleteHistoryItem(r.path))}
+                  title="Remove from history"
+                  aria-label="Remove from history"
                 >
-                  ✕ Remove
+                  <RemoveIcon />
                 </button>
               </>
             );

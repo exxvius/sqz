@@ -389,6 +389,9 @@
   flex: 1;
 }
 .queue-row .rm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   color: var(--text-faint);

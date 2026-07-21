@@ -6,6 +6,7 @@ import { EncoderPanel } from "../components/EncoderPanel";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { QualityPresets } from "../components/QualityPresets";
 import { ReclaimBreakdown, ReclaimSummary } from "../components/ReclaimPanel";
+import { RemoveXIcon } from "../components/icons";
 import { api } from "../lib/api";
 import { EV } from "../lib/events";
 import { useStore } from "../lib/store";
@@ -164,7 +165,7 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
                   {maskPath(p)}
                 </span>
                 <button className="rm" onClick={() => removeInput(p)} aria-label="Remove">
-                  ✕
+                  <RemoveXIcon />
                 </button>
               </div>
             ))}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RemoveXIcon } from "./icons";
 import { pickInputs } from "../lib/api";
 import type { RunConfig, SavedLibrary } from "../lib/types";
 import { AdvancedOptions } from "./AdvancedOptions";
@@ -82,7 +83,7 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
                     onClick={() => setRoots((prev) => prev.filter((x) => x !== r))}
                     aria-label="Remove folder"
                   >
-                    ✕
+                    <RemoveXIcon />
                   </button>
                 </div>
               ))}
