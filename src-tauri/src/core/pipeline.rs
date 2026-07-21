@@ -53,6 +53,21 @@ fn set(manifest: &Manifest, path: &str, outcome: Outcome, upd: StatusUpdate) {
     }
 }
 
+/// Reflect a successfully-processed file's health in the Library. The source
+/// already cleared the health gate (or, for a kept file, probed fine), so with
+/// the gate on every outcome the run finishes — re-encoded, normalized, or kept
+/// for no gain — reads as `healthy`, so a run populates the Library for free.
+/// With the gate off, keep the legacy behavior: drop a replaced file's now-stale
+/// scan, and leave a kept file's prior scan untouched. `replaced` is true when the
+/// file was rewritten (done/normalized), false when the original was kept (a skip).
+fn record_processed_health(cfg: &Config, manifest: &Manifest, path: &str, replaced: bool) {
+    if cfg.health_gate != HealthGate::Off {
+        let _ = manifest.record_health(path, HealthState::Healthy.as_str(), None, None, None);
+    } else if replaced {
+        let _ = manifest.clear_health(path);
+    }
+}
+
 fn meta_of(info: &MediaInfo) -> StatusUpdate {
     StatusUpdate {
         src_codec: info.codec.clone(),
@@ -84,6 +99,8 @@ fn skip_or_normalize(
         }
     }
     set(manifest, path_str, skip, meta_of(info));
+    // The original is kept and probed fine, so record it healthy (gate on).
+    record_processed_health(cfg, manifest, path_str, false);
     ProcessResult::new(path_str, skip)
 }
 
@@ -155,9 +172,9 @@ fn try_remux(
             ..meta_of(info)
         },
     );
-    // The original was replaced, so any prior health scan of it is now stale —
-    // drop it from the Library (a rescan will pick up the new file).
-    let _ = manifest.clear_health(path_str);
+    // The remuxed output was verified playable, so record it healthy (gate on) —
+    // a normalized file still shows in the Library. (Gate off drops the stale scan.)
+    record_processed_health(cfg, manifest, path_str, true);
     // Re-key the row to the file that exists now, so a rescan matches this row
     // instead of adding a duplicate for the new extension. No-op if unchanged.
     let _ = manifest.rename_path(path_str, &final_path.to_string_lossy());
@@ -590,6 +607,8 @@ pub fn process_file(
                 ..meta_upd(&info)
             },
         );
+        // The original is kept and probed fine, so record it healthy (gate on).
+        record_processed_health(cfg, manifest, path_str, false);
         return ProcessResult::new(path_str, Outcome::SkippedNoGain).with_message(msg);
     }
 
@@ -642,6 +661,8 @@ pub fn process_file(
                     ..meta_upd(&info)
                 },
             );
+            // The original is kept and probed fine, so record it healthy (gate on).
+            record_processed_health(cfg, manifest, path_str, false);
             return ProcessResult::new(path_str, Outcome::SkippedNoGain);
         }
         set(
@@ -695,16 +716,9 @@ pub fn process_file(
         },
     );
     // The output already passed verify_output's decode, so the final file *is*
-    // freshly-verified healthy. With the gate on, record that — a run populates the
-    // Library health view for free (the encoded output verified healthy at both
-    // ends). With the gate Off, keep the legacy behavior: just drop the now-stale
-    // scan of the replaced original. (codec/height were already set on the Done
-    // status above, so the health record only carries the verdict.)
-    if cfg.health_gate == HealthGate::Off {
-        let _ = manifest.clear_health(path_str);
-    } else {
-        let _ = manifest.record_health(path_str, HealthState::Healthy.as_str(), None, None, None);
-    }
+    // freshly-verified healthy — record it (gate on) so a run populates the Library
+    // for free; gate off drops the now-stale scan of the replaced original.
+    record_processed_health(cfg, manifest, path_str, true);
     // Re-key the row to the file that now exists on disk (the extension may have
     // changed), so a later health scan updates this row instead of discovering the
     // new path as a separate file and duplicating the Library entry. No-op when the
