@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RemoveXIcon } from "./icons";
+import { AddFolderIcon, RemoveXIcon, SaveIcon } from "./icons";
 import { pickInputs } from "../lib/api";
 import type { RunConfig, SavedLibrary } from "../lib/types";
 import { AdvancedOptions } from "./AdvancedOptions";
@@ -70,7 +70,12 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
         </div>
 
         <div className="field field-stack">
-          <label>Folders</label>
+          <div className="row between" style={{ width: "100%" }}>
+            <label>Folders</label>
+            <button className="mini-btn" onClick={addFolders}>
+              <AddFolderIcon /> Add folder
+            </button>
+          </div>
           {roots.length > 0 ? (
             <div className="queue">
               {roots.map((r) => (
@@ -93,9 +98,6 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
               Add at least one folder for this library.
             </p>
           )}
-          <button className="mini-btn" onClick={addFolders}>
-            + Add folder
-          </button>
         </div>
 
         <QualityPresets
@@ -125,7 +127,7 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
             Cancel
           </button>
           <button className="btn primary" onClick={save} disabled={!canSave}>
-            {saving ? "Saving…" : "Save library"}
+            <SaveIcon /> {saving ? "Saving…" : "Save library"}
           </button>
         </div>
       </div>

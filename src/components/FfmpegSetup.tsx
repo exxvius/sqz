@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, pickBinary } from "../lib/api";
+import { RestoreIcon } from "./icons";
 import { humanBytes } from "../lib/format";
 import { useLock } from "../lib/lock";
 import type { FfStatus, FfmpegProgress } from "../lib/types";
@@ -119,7 +120,7 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
         </button>
         {ff?.source === "custom" && (
           <button className="btn ghost" onClick={reset} disabled={busy || locked}>
-            Reset to auto
+            <RestoreIcon /> Reset to auto
           </button>
         )}
       </div>

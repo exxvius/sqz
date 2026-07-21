@@ -117,6 +117,33 @@ export function RemoveXIcon({ size = 14 }: IconProps) {
   );
 }
 
+/** Stacked lines — clear a list. */
+export function ClearIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M3 17v-2h14v2zm2-4v-2h14v2zm2-4V7h14v2z" />
+    </svg>
+  );
+}
+
+/** Folder with a plus — add a folder. */
+export function AddFolderIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M2 20V4h8l2 2h10v14zm2-2h16V8h-8.825l-2-2H4zm0 0V6zm10-2h2v-2h2v-2h-2v-2h-2v2h-2v2h2z" />
+    </svg>
+  );
+}
+
+/** Floppy disk — save. */
+export function SaveIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M21 7v14H3V3h14zm-2 .85L16.15 5H5v14h14zm-4.875 9.275Q15 16.25 15 15t-.875-2.125T12 12t-2.125.875T9 15t.875 2.125T12 18t2.125-.875M6 10h9V6H6zM5 7.85V19V5z" />
+    </svg>
+  );
+}
+
 /** Checkmark — a healthy / re-encoded status symbol. */
 export function CheckIcon({ size = 16 }: IconProps) {
   return (

@@ -1,6 +1,7 @@
 import { Collapsible } from "./Collapsible";
 import { NumberField, Switch } from "./atoms";
 import { Select } from "./Select";
+import { FolderIcon, RestoreIcon } from "./icons";
 import { pickFolder } from "../lib/api";
 import type {
   AudioMode,
@@ -157,11 +158,11 @@ export function AdvancedOptions({ config, patch }: Props) {
                   if (f) patch({ holding_dir: f });
                 }}
               >
-                Choose…
+                <FolderIcon /> Choose…
               </button>
               {config.holding_dir && (
                 <button className="mini-btn" onClick={() => patch({ holding_dir: null })}>
-                  Reset
+                  <RestoreIcon /> Reset
                 </button>
               )}
             </div>

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { EventLog } from "../components/EventLog";
 import { LiveFiles } from "../components/LiveFiles";
+import { ClearIcon } from "../components/icons";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
 import { useLock } from "../lib/lock";
@@ -106,7 +107,7 @@ export function DashboardView() {
           <div className="card-title">Event log</div>
           {store.log.length > 0 && (
             <button className="mini-btn" onClick={store.clearLog}>
-              Clear
+              <ClearIcon /> Clear
             </button>
           )}
         </div>

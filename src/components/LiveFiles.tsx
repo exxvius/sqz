@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { ActiveFile } from "../lib/store";
+import { CancelIcon } from "./icons";
 import { fmtDuration, humanBytes, pct } from "../lib/format";
 import { useLock } from "../lib/lock";
 
@@ -74,7 +75,7 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
               </span>
               {!locked && (
                 <button className="live-abort" onClick={() => onAbort(f.path)}>
-                  Abort
+                  <CancelIcon /> Abort
                 </button>
               )}
             </div>

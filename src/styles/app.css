@@ -1609,6 +1609,9 @@
   letter-spacing: 0.02em;
 }
 .live-abort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--glass-border);
   background: var(--surface);
   color: var(--text-dim);
@@ -1617,6 +1620,9 @@
   font-size: var(--text-xs);
   flex-shrink: 0;
   box-shadow: var(--glass-highlight);
+}
+.live-abort svg {
+  opacity: 0.85;
 }
 .live-abort:hover {
   border-color: var(--bad);

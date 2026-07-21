@@ -6,7 +6,7 @@ import { EncoderPanel } from "../components/EncoderPanel";
 import { FfmpegSetup } from "../components/FfmpegSetup";
 import { QualityPresets } from "../components/QualityPresets";
 import { ReclaimBreakdown, ReclaimSummary } from "../components/ReclaimPanel";
-import { RemoveXIcon } from "../components/icons";
+import { ClearIcon, RemoveXIcon } from "../components/icons";
 import { api } from "../lib/api";
 import { EV } from "../lib/events";
 import { useStore } from "../lib/store";
@@ -155,7 +155,7 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
               {config.inputs.length} source{config.inputs.length > 1 ? "s" : ""}
             </div>
             <button className="btn ghost" onClick={() => patch({ inputs: [] })}>
-              Clear
+              <ClearIcon /> Clear
             </button>
           </div>
           <div className="queue" style={{ marginTop: "var(--space-3)" }}>
