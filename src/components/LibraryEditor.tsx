@@ -11,6 +11,7 @@ import { AdvancedOptions } from "./AdvancedOptions";
 import { Collapsible } from "./Collapsible";
 import { EncoderPanel } from "./EncoderPanel";
 import { QualityPresets } from "./QualityPresets";
+import { Select } from "./Select";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -193,26 +194,18 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
                     Either way only new or changed files are re-encoded.
                   </div>
                 </label>
-                <div className="seg" role="group" aria-label="Trigger type">
-                  <button
-                    aria-pressed={trigger.kind === "daily"}
-                    onClick={() => setKind("daily")}
-                  >
-                    Daily
-                  </button>
-                  <button
-                    aria-pressed={trigger.kind === "interval"}
-                    onClick={() => setKind("interval")}
-                  >
-                    Interval
-                  </button>
-                  <button
-                    aria-pressed={trigger.kind === "onchange"}
-                    onClick={() => setKind("onchange")}
-                  >
-                    On change
-                  </button>
-                </div>
+                <Select
+                  value={trigger.kind}
+                  ariaLabel="Trigger type"
+                  options={[
+                    { value: "daily", label: "Daily" },
+                    { value: "interval", label: "Interval" },
+                    { value: "onchange", label: "On change" },
+                  ]}
+                  onChange={(v) =>
+                    setKind(v as "daily" | "interval" | "onchange")
+                  }
+                />
               </div>
 
               {trigger.kind === "onchange" ? (
