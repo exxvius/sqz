@@ -17,13 +17,16 @@ use crate::core::encoders::{self, Detection};
 use crate::core::estimate::{self, ProbedFile, ReclaimProjection};
 use crate::core::ffbin::FfBin;
 use crate::core::health::{classify, HealthState};
+use crate::core::idle;
 use crate::core::library::{self, SavedLibrary};
 use crate::core::lock::Lock;
 use crate::core::manifest::{mtime_secs, HistoryQuery, HistoryRow, LibraryRow, Manifest};
 use crate::core::probe::{probe, probe_many};
+use crate::core::schedule::{self, AutomationSettings};
 use crate::core::util::command_no_window;
 use crate::events::{
-    TauriReporter, EV_HEALTH_DONE, EV_HEALTH_PROGRESS, EV_PROJECTION, EV_RUN_DONE,
+    RunSourceInfo, TauriReporter, EV_HEALTH_DONE, EV_HEALTH_PROGRESS, EV_PROJECTION, EV_RUN_DONE,
+    EV_RUN_SOURCE,
 };
 use crate::run::{run, ActiveMap, RunSummary};
 
@@ -51,6 +54,9 @@ pub struct AppState {
     /// Cancel token for the in-flight library health scan. A new scan cancels the
     /// previous one, so a changing input set never leaves two scans racing.
     pub health: Mutex<Option<Arc<AtomicBool>>>,
+    /// Library id of an in-flight *unattended* run (`None` for manual/idle). Lets
+    /// the supervisor know which run it owns and whose `idle_only` to honor.
+    pub automation_active: Mutex<Option<String>>,
     /// Password-gated lock: masks personal info and makes the app read-only.
     pub lock: Lock,
 }
@@ -67,6 +73,7 @@ impl AppState {
             active: Arc::new(Mutex::new(HashMap::new())),
             projection: Mutex::new(None),
             health: Mutex::new(None),
+            automation_active: Mutex::new(None),
             lock,
         }
     }
@@ -89,6 +96,14 @@ impl AppState {
 
     fn libraries_path(&self) -> PathBuf {
         self.data_dir.join("libraries.json")
+    }
+
+    fn watch_state_path(&self) -> PathBuf {
+        self.data_dir.join("watch_state.json")
+    }
+
+    fn automation_path(&self) -> PathBuf {
+        self.data_dir.join("automation.json")
     }
 }
 
@@ -573,18 +588,32 @@ fn finalize_config(state: &AppState, mut cfg: Config) -> Result<Config, String> 
     Ok(cfg)
 }
 
+/// Where a run came from: a user pressing Start, or the supervisor firing a
+/// watched library's schedule. Drives the `automation_active` slot and the
+/// run-source label the UI shows.
+#[derive(Clone)]
+enum RunSource {
+    Manual,
+    Unattended { id: String, name: String },
+}
+
 #[tauri::command]
 pub fn start_run(app: AppHandle, config: Config, state: State<'_, AppState>) -> Result<(), String> {
     guard_locked(&state)?;
     let cfg = finalize_config(&state, config)?;
     // Remember the settings so retry/force can resume with them when idle.
     *state.last_config.lock().unwrap() = Some(cfg.clone());
-    launch_run(app, cfg, &state)
+    launch_run(app, cfg, &state, RunSource::Manual)
 }
 
 /// Spawn the worker run for a finalized config. Rejects if a run is already
 /// active (re-checked here so it's safe to call from retry/force too).
-fn launch_run(app: AppHandle, cfg: Config, state: &AppState) -> Result<(), String> {
+fn launch_run(
+    app: AppHandle,
+    cfg: Config,
+    state: &AppState,
+    source: RunSource,
+) -> Result<(), String> {
     {
         let guard = state.run.lock().unwrap();
         if guard.is_some() {
@@ -618,9 +647,22 @@ fn launch_run(app: AppHandle, cfg: Config, state: &AppState) -> Result<(), Strin
         paused: Arc::clone(&paused),
     });
 
+    // Record whether this run is autonomous (so the supervisor knows which run it
+    // owns) and label it for the UI.
+    *state.automation_active.lock().unwrap() = match &source {
+        RunSource::Unattended { id, .. } => Some(id.clone()),
+        RunSource::Manual => None,
+    };
+    emit_run_source(&app, &source);
+
     let db_path = state.db_path();
     let active = Arc::clone(&state.active);
     let app_for_thread = app.clone();
+    // Name the library on the completion notification for unattended runs.
+    let done_label = match &source {
+        RunSource::Unattended { name, .. } => Some(name.clone()),
+        RunSource::Manual => None,
+    };
 
     std::thread::spawn(move || {
         let manifest = match Manifest::open(&db_path) {
@@ -638,12 +680,30 @@ fn launch_run(app: AppHandle, cfg: Config, state: &AppState) -> Result<(), Strin
         );
 
         active.lock().unwrap().clear();
-        notify_done(&app_for_thread, &summary);
+        notify_done(&app_for_thread, &summary, done_label.as_deref());
         let _ = app_for_thread.emit(EV_RUN_DONE, &summary);
         clear_run(&app_for_thread);
     });
 
     Ok(())
+}
+
+/// Tell the UI whether the run that just launched is manual or an unattended run
+/// of a named library, so it can label progress and show an auto-paused state.
+fn emit_run_source(app: &AppHandle, source: &RunSource) {
+    let info = match source {
+        RunSource::Manual => RunSourceInfo {
+            source: "manual".into(),
+            library_id: None,
+            library_name: None,
+        },
+        RunSource::Unattended { id, name } => RunSourceInfo {
+            source: "unattended".into(),
+            library_id: Some(id.clone()),
+            library_name: Some(name.clone()),
+        },
+    };
+    let _ = app.emit(EV_RUN_SOURCE, info);
 }
 
 /// Abort a single file that's currently being processed (leaves the run going).
@@ -700,7 +760,7 @@ fn resume_if_idle(app: AppHandle, state: &AppState) {
     let cfg = cfg.or_else(|| persisted_config(state));
     if let Some(cfg) = cfg {
         // Best-effort: launch_run re-checks the run slot, so a race just no-ops.
-        let _ = launch_run(app, cfg, state);
+        let _ = launch_run(app, cfg, state, RunSource::Manual);
     }
 }
 
@@ -725,10 +785,11 @@ async fn requeue(db: PathBuf, path: String, force: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Clear the active-run slot so a new run can start.
+/// Clear the active-run slot (and the unattended marker) so a new run can start.
 fn clear_run(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
         *state.run.lock().unwrap() = None;
+        *state.automation_active.lock().unwrap() = None;
     }
 }
 
@@ -742,7 +803,7 @@ impl RunError {
     }
 }
 
-fn notify_done(app: &AppHandle, summary: &RunSummary) {
+fn notify_done(app: &AppHandle, summary: &RunSummary, library: Option<&str>) {
     use tauri_plugin_notification::NotificationExt;
     if summary.interrupted {
         return;
@@ -752,12 +813,13 @@ fn notify_done(app: &AppHandle, summary: &RunSummary) {
         summary.done,
         crate::core::util::human_bytes(summary.saved_bytes.max(0) as f64)
     );
-    let _ = app
-        .notification()
-        .builder()
-        .title("sqz — run complete")
-        .body(body)
-        .show();
+    // Name the library for unattended runs — the user was away, so the toast is
+    // how they learn what happened.
+    let title = match library {
+        Some(name) => format!("sqz — {name} processed"),
+        None => "sqz — run complete".to_string(),
+    };
+    let _ = app.notification().builder().title(title).body(body).show();
 }
 
 #[tauri::command]
@@ -959,6 +1021,163 @@ pub fn delete_library(id: String, state: State<'_, AppState>) -> Result<(), Stri
     let path = state.libraries_path();
     let libs = library::remove(library::load_all(&path), &id);
     library::save_all(&path, &libs)
+}
+
+// ── Unattended automation ──────────────────────────────────────────────────
+
+/// One watched library's automation status, for the Dashboard panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct AutomationEntry {
+    pub library_id: String,
+    pub name: String,
+    /// Unix seconds of the next scheduled fire (a due schedule reads as "now").
+    pub next_run_at: Option<f64>,
+    /// Unix seconds of the last auto-run, if it has ever fired.
+    pub last_auto_run_at: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutomationStatus {
+    /// The global master switch.
+    pub enabled: bool,
+    /// Watched libraries, each with its next/last unattended-run times.
+    pub entries: Vec<AutomationEntry>,
+}
+
+/// Automation status for the Dashboard: the master switch plus every watched
+/// library's next/last run. Read-only, so it stays available under lock (names are
+/// labels, not personal paths).
+#[tauri::command]
+pub fn get_automation(state: State<'_, AppState>) -> AutomationStatus {
+    let enabled = schedule::load_automation(&state.automation_path()).enabled;
+    let libs = library::load_all(&state.libraries_path());
+    let watch = schedule::load_state(&state.watch_state_path());
+    let now = chrono::Local::now();
+    let entries = libs
+        .iter()
+        .filter(|l| l.watch.enabled)
+        .map(|l| {
+            let last = watch.last(&l.id);
+            AutomationEntry {
+                library_id: l.id.clone(),
+                name: l.name.clone(),
+                next_run_at: Some(schedule::next_run_at(l.watch.trigger, last, now)),
+                last_auto_run_at: last,
+            }
+        })
+        .collect();
+    AutomationStatus { enabled, entries }
+}
+
+/// Flip the global automation master switch. Off pauses all watching without
+/// touching any per-library schedule.
+#[tauri::command]
+pub fn set_automation_enabled(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
+    schedule::save_automation(&state.automation_path(), &AutomationSettings { enabled })
+}
+
+/// Manually kick a saved library's run now (the automation panel's "Run now").
+/// A normal manual run — it does not reset the library's schedule.
+#[tauri::command]
+pub fn run_library_now(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    guard_locked(&state)?;
+    let lib = library::load_all(&state.libraries_path())
+        .into_iter()
+        .find(|l| l.id == id)
+        .ok_or_else(|| "No such library.".to_string())?;
+    let mut cfg = lib.profile.clone();
+    cfg.inputs = lib.roots.clone();
+    let cfg = finalize_config(&state, cfg)?;
+    *state.last_config.lock().unwrap() = Some(cfg.clone());
+    launch_run(app, cfg, &state, RunSource::Manual)
+}
+
+/// The tick interval for the unattended supervisor.
+const SUPERVISOR_TICK_SECS: u64 = 60;
+
+/// Spawn the unattended supervisor: a background tick that steers an in-flight
+/// unattended run's pause state and launches at most one due library per tick.
+/// Cheap and self-contained; started once from `lib.rs` after state is managed.
+pub fn spawn_supervisor(app: AppHandle) {
+    std::thread::spawn(move || {
+        // Let startup (ffmpeg probe, window) settle before the first tick.
+        std::thread::sleep(Duration::from_secs(10));
+        loop {
+            supervisor_tick(&app);
+            std::thread::sleep(Duration::from_secs(SUPERVISOR_TICK_SECS));
+        }
+    });
+}
+
+/// One supervisor pass. Pure decisions live in `core::schedule`; this only does the
+/// I/O around them (clock, idle probe, launching through the ordinary run path).
+fn supervisor_tick(app: &AppHandle) {
+    let state = match app.try_state::<AppState>() {
+        Some(s) => s,
+        None => return,
+    };
+    // Master switch off → nothing to do.
+    if !schedule::load_automation(&state.automation_path()).enabled {
+        return;
+    }
+    let system_idle = idle::is_idle(idle::DEFAULT_IDLE_SECS);
+
+    // 1. Steer an in-flight unattended run via its existing paused token, and never
+    //    launch over it.
+    let active_id = state.automation_active.lock().unwrap().clone();
+    if let Some(id) = active_id {
+        if let Some(lib) = library::load_all(&state.libraries_path())
+            .into_iter()
+            .find(|l| l.id == id)
+        {
+            let pause = schedule::should_pause(&lib, system_idle);
+            if let Some(rc) = &*state.run.lock().unwrap() {
+                rc.paused.store(pause, Ordering::Relaxed);
+            }
+        }
+        return;
+    }
+
+    // 2. Don't compete with manual work (a run or a health scan always wins).
+    if state.run.lock().unwrap().is_some() || state.health.lock().unwrap().is_some() {
+        return;
+    }
+
+    // 3. Launch at most one due library, oldest-due first.
+    let libs = library::load_all(&state.libraries_path());
+    let mut watch = schedule::load_state(&state.watch_state_path());
+    let now = chrono::Local::now();
+    let due = schedule::due_libraries(&libs, &watch, now, system_idle);
+    let Some(first) = due.first() else {
+        return;
+    };
+    let Some(lib) = libs.iter().find(|l| l.id == first.library_id) else {
+        return;
+    };
+
+    let mut cfg = lib.profile.clone();
+    cfg.inputs = lib.roots.clone();
+    let cfg = match finalize_config(&state, cfg) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("skipping unattended run of {}: {e}", lib.name);
+            return;
+        }
+    };
+    // Mark before launching so a crash mid-run can't re-fire instantly on restart.
+    watch.mark(&lib.id, now.timestamp() as f64);
+    let _ = schedule::save_state(&state.watch_state_path(), &watch);
+
+    let source = RunSource::Unattended {
+        id: lib.id.clone(),
+        name: lib.name.clone(),
+    };
+    let _ = launch_run(app.clone(), cfg, &state, source);
 }
 
 #[tauri::command]

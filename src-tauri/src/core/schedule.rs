@@ -57,6 +57,31 @@ pub fn save_state(path: &Path, state: &WatchState) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
+/// Global automation master switch, persisted in `data_dir/automation.json` —
+/// apart from the frontend-owned settings blob so `save_settings` can't clobber it.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+pub struct AutomationSettings {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Read the master switch. Missing/corrupt → disabled (automation is opt-in).
+pub fn load_automation(path: &Path) -> AutomationSettings {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the master switch, creating the parent dir if needed.
+pub fn save_automation(path: &Path, settings: &AutomationSettings) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
 /// A library that should start an unattended run now.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Due {
@@ -127,6 +152,31 @@ pub fn due_libraries(
         ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
     });
     due
+}
+
+/// Unix seconds when `trigger` will next fire, given its last auto-run and `now`.
+/// A currently-due schedule returns `now` ("due now"); otherwise the upcoming
+/// instant. For display in the automation panel. Pure.
+pub fn next_run_at(trigger: Trigger, last_run: Option<f64>, now: DateTime<Local>) -> f64 {
+    let now_secs = now.timestamp() as f64;
+    if is_due(trigger, last_run, now) {
+        return now_secs;
+    }
+    match trigger {
+        // Not due ⇒ it has run before, so last_run is Some.
+        Trigger::Interval { every_mins } => last_run
+            .map(|p| p + (every_mins * 60) as f64)
+            .unwrap_or(now_secs),
+        Trigger::Daily { hour, minute } => {
+            let today = daily_trigger_today(now, hour, minute);
+            if now < today {
+                today.timestamp() as f64
+            } else {
+                // Already ran today; next is tomorrow's trigger.
+                today.timestamp() as f64 + 24.0 * 3600.0
+            }
+        }
+    }
 }
 
 /// Should an in-flight unattended run be paused right now? True when the running
@@ -264,6 +314,51 @@ mod tests {
         assert!(!should_pause(&idle_lib, true));
         let anytime_lib = watched("b", Trigger::default(), false);
         assert!(!should_pause(&anytime_lib, false));
+    }
+
+    #[test]
+    fn next_run_at_is_now_when_due() {
+        let now = at(12, 0);
+        assert_eq!(
+            next_run_at(Trigger::Interval { every_mins: 60 }, None, now),
+            now.timestamp() as f64
+        );
+    }
+
+    #[test]
+    fn next_run_at_interval_is_last_plus_period() {
+        let now = at(12, 0);
+        let last = now.timestamp() as f64 - 20.0 * 60.0; // ran 20 min ago
+        assert_eq!(
+            next_run_at(Trigger::Interval { every_mins: 60 }, Some(last), now),
+            last + 3600.0
+        );
+    }
+
+    #[test]
+    fn next_run_at_daily_is_today_before_and_tomorrow_after() {
+        let trig = Trigger::Daily { hour: 3, minute: 0 };
+        // Before today's trigger, never run → due now (03:00 not yet reached at 02:00).
+        assert_eq!(
+            next_run_at(trig, None, at(2, 0)),
+            at(3, 0).timestamp() as f64
+        );
+        // Ran at 03:30 today, now 04:00 → next is tomorrow 03:00.
+        let ran_today = at(3, 30).timestamp() as f64;
+        assert_eq!(
+            next_run_at(trig, Some(ran_today), at(4, 0)),
+            at(3, 0).timestamp() as f64 + 24.0 * 3600.0
+        );
+    }
+
+    #[test]
+    fn automation_settings_round_trip() {
+        let dir = std::env::temp_dir().join(format!("sqz-auto-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("automation.json");
+        assert!(!load_automation(&path).enabled);
+        save_automation(&path, &AutomationSettings { enabled: true }).unwrap();
+        assert!(load_automation(&path).enabled);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -75,6 +75,9 @@ pub fn run() {
             init_logging(&data_dir);
             app.manage(AppState::new(data_dir));
             setup_tray(app)?;
+            // Start the unattended supervisor (watches saved libraries, runs on
+            // schedule/idle). No-op until the user enables automation.
+            crate::commands::spawn_supervisor(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -93,6 +96,9 @@ pub fn run() {
             commands::list_libraries,
             commands::save_library,
             commands::delete_library,
+            commands::get_automation,
+            commands::set_automation_enabled,
+            commands::run_library_now,
             commands::start_run,
             commands::pause_run,
             commands::resume_run,

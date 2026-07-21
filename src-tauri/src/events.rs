@@ -28,6 +28,19 @@ pub const EV_QUALITY_RESOLVED: &str = "sqz-quality-resolved";
 pub const EV_HEALTH_PROGRESS: &str = "sqz-health-progress";
 /// Emitted once when a health scan finishes (payload: the run's summary).
 pub const EV_HEALTH_DONE: &str = "sqz-health-done";
+/// Emitted when a run launches, telling the UI whether it's a manual run or an
+/// unattended (scheduled) run of a named library, so it can label it and show an
+/// auto-paused state. Payload: [`RunSourceInfo`].
+pub const EV_RUN_SOURCE: &str = "sqz-run-source";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunSourceInfo {
+    /// "manual" or "unattended".
+    pub source: String,
+    /// The watched library's id/name, present only for unattended runs.
+    pub library_id: Option<String>,
+    pub library_name: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStart {
