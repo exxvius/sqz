@@ -479,6 +479,12 @@ impl Manifest {
     /// probe revealed. Never touches `status`: health is an orthogonal axis, so a
     /// scan can annotate a `done` or `pending` row without re-queuing it. Codec and
     /// height are COALESCE-guarded so a `None` probe never wipes known metadata.
+    /// Record a health verdict for a file. `src_codec`/`height` are filled in only
+    /// when the row doesn't already have them — for an encoded row they hold the
+    /// *original source* codec/height (a historical fact set by the pipeline), and
+    /// a later scan probes the re-encoded *output* (a different codec), which must
+    /// not overwrite that source record. A never-encoded row starts with them NULL,
+    /// so its first scan still populates them.
     pub fn record_health(
         &self,
         path: &str,
@@ -490,7 +496,8 @@ impl Manifest {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE files SET health=?1, health_detail=?2, health_checked_at=?3, \
-             src_codec=COALESCE(?4, src_codec), height=COALESCE(?5, height) WHERE path=?6",
+             src_codec=CASE WHEN src_codec IS NULL THEN ?4 ELSE src_codec END, \
+             height=CASE WHEN height IS NULL THEN ?5 ELSE height END WHERE path=?6",
             params![health, detail, now(), src_codec, height, path],
         )?;
         Ok(())
@@ -1004,6 +1011,47 @@ mod tests {
         let counts = m.health_counts().unwrap();
         assert_eq!(counts.get("corrupt").copied().unwrap_or(0), 1);
         assert!(counts.get("unscanned").is_none());
+    }
+
+    #[test]
+    fn record_health_preserves_the_recorded_source_codec_for_any_transition() {
+        // Whatever the source was and whatever it was re-encoded to, a later scan
+        // of the output must not rewrite the recorded source. The codec pairs are
+        // arbitrary — the rule is codec-agnostic (nothing assumes a target codec).
+        for (i, (src_codec, out_codec)) in [
+            ("h264", "av1"),
+            ("av1", "hevc"),
+            ("hevc", "h264"),
+            ("mpeg2video", "av1"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let m = mem_db();
+            let path = format!("/clip{i}.mkv");
+            // The pipeline recorded the ORIGINAL source codec on the encoded row.
+            m.upsert_scanned(&path, 100, 1.0, false, true).unwrap();
+            m.set_status(
+                &path,
+                STATUS_DONE,
+                &StatusUpdate {
+                    src_codec: Some((*src_codec).into()),
+                    height: Some(1080),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            // A scan probes the re-encoded output — it must keep the source codec.
+            m.record_health(&path, "healthy", None, Some(out_codec), Some(2160))
+                .unwrap();
+            let row = &m.history(&HistoryQuery::default()).unwrap()[0];
+            assert_eq!(
+                row.src_codec.as_deref(),
+                Some(*src_codec),
+                "{src_codec}->{out_codec}"
+            );
+            assert_eq!(row.height, Some(1080), "{src_codec}->{out_codec}");
+        }
     }
 
     #[test]
