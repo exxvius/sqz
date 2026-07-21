@@ -54,11 +54,31 @@ export function NewLibraryIcon({ size = 18 }: IconProps) {
   );
 }
 
-/** Bracketed eye — the "watch this library" (unattended) toggle. */
-export function WatchIcon({ size = 16 }: IconProps) {
+/** An eye that closes (off) and opens (on) — the "watch this library" toggle.
+ *  The lid path and pupil radius animate between states via CSS (`.eye-icon.open`
+ *  in app.css), which transitions `d`/`r` — supported in the app's Chromium view. */
+export function WatchIcon({
+  size = 16,
+  open = false,
+}: IconProps & { open?: boolean }) {
   return (
-    <svg {...filled(size)}>
-      <path d="M1 23v-5h2v3h3v2zm17 0v-2h3v-3h2v5zm-6-4.5q-3 0-5.437-1.775T3 12q1.125-2.95 3.563-4.725T12 5.5t5.438 1.775T21 12q-1.125 2.95-3.562 4.725T12 18.5m0-2q2.2 0 4.025-1.2t2.8-3.3q-.975-2.1-2.8-3.3T12 7.5T7.975 8.7t-2.8 3.3q.975 2.1 2.8 3.3T12 16.5m0-1q1.45 0 2.475-1.025T15.5 12t-1.025-2.475T12 8.5T9.525 9.525T8.5 12t1.025 2.475T12 15.5m0-2q-.625 0-1.063-.437T10.5 12t.438-1.062T12 10.5t1.063.438T13.5 12t-.437 1.063T12 13.5M1 6V1h5v2H3v3zm20 0V3h-3V1h5v5z" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden
+      className={`eye-icon${open ? " open" : ""}`}
+    >
+      <path
+        className="eye-lid"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 12c1.38 -0.77 4.42 -1.3 8 -1.3c3.58 0 6.62 0.53 8 1.3c-1.38 0.77 -4.42 1.3 -8 1.3c-3.58 0 -6.62 -0.53 -8 -1.3Z"
+      />
+      <circle className="eye-pupil" cx="12" cy="12" r="0" fill="currentColor" />
     </svg>
   );
 }

@@ -88,7 +88,7 @@ export function AutomationPanel() {
           className="card-title"
           style={{ display: "flex", alignItems: "center", gap: 6 }}
         >
-          <WatchIcon size={15} /> Automation
+          <WatchIcon size={15} open /> Automation
         </div>
         {!locked && (
           <div
@@ -131,7 +131,7 @@ export function AutomationPanel() {
               >
                 <div className="lib-row-main">
                   <span className="lib-name">
-                    {isRunning && <WatchIcon size={13} />} {e.name}
+                    {isRunning && <WatchIcon size={13} open />} {e.name}
                   </span>
                   <span className="muted lib-meta">{meta}</span>
                 </div>

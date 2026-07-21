@@ -331,7 +331,7 @@ export function LibraryView({ goDashboard }: Props) {
                       }
                       aria-label="Watch this library"
                     >
-                      <WatchIcon />
+                      <WatchIcon open={lib.watch.enabled} />
                     </button>
                     <div className="lib-row-main">
                       <span className="lib-name">{lib.name}</span>
