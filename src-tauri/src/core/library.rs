@@ -18,6 +18,69 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{Config, OnSuccess};
 
+/// Smallest interval (minutes) an `Interval` trigger may fire on, so a fat-fingered
+/// "every 1 minute" can't turn unattended mode into a busy loop.
+pub const MIN_INTERVAL_MINS: u64 = 15;
+
+/// When a watched library fires an unattended run.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Trigger {
+    /// Re-run every `every_mins` minutes (clamped to [`MIN_INTERVAL_MINS`]).
+    Interval { every_mins: u64 },
+    /// Re-run once per calendar day at a local wall-clock time.
+    Daily { hour: u8, minute: u8 },
+}
+
+impl Default for Trigger {
+    /// Overnight at 03:00 — the "process while I sleep" default.
+    fn default() -> Self {
+        Trigger::Daily { hour: 3, minute: 0 }
+    }
+}
+
+/// Per-library unattended-run configuration. All of it round-trips through
+/// `libraries.json`; the toggle that flips `enabled` is the one-click Watch button,
+/// the rest live in the library editor.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WatchConfig {
+    /// This library participates in unattended runs.
+    pub enabled: bool,
+    /// When it fires.
+    pub trigger: Trigger,
+    /// Only start (and stay running) while the machine is input-idle.
+    pub idle_only: bool,
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            trigger: Trigger::default(),
+            idle_only: true,
+        }
+    }
+}
+
+impl WatchConfig {
+    /// Clamp/validate the schedule for persistence: an `Interval` can't dip below
+    /// the floor, and a `Daily` time must be a real wall-clock instant.
+    fn normalized(mut self) -> Result<Self, String> {
+        match &mut self.trigger {
+            Trigger::Interval { every_mins } => {
+                *every_mins = (*every_mins).max(MIN_INTERVAL_MINS);
+            }
+            Trigger::Daily { hour, minute } => {
+                if *hour > 23 || *minute > 59 {
+                    return Err("Daily schedule must be a valid time of day.".into());
+                }
+            }
+        }
+        Ok(self)
+    }
+}
+
 /// A named folder set with its own encode profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedLibrary {
@@ -31,6 +94,10 @@ pub struct SavedLibrary {
     /// Encode profile: a `Config` with `inputs` empty. `Config`'s
     /// `#[serde(default)]` lets old/new fields round-trip as the schema evolves.
     pub profile: Config,
+    /// Unattended-run schedule. `#[serde(default)]` so every library already in
+    /// `libraries.json` round-trips as "not watched".
+    #[serde(default)]
+    pub watch: WatchConfig,
     /// Unix seconds when first saved.
     pub created_at: f64,
     /// Unix seconds of the most recent save.
@@ -63,6 +130,8 @@ impl SavedLibrary {
         }
         // A profile is codec settings only — never file paths.
         self.profile.inputs = Vec::new();
+        // Clamp/validate the watch schedule at the boundary too.
+        self.watch = self.watch.normalized()?;
         // Validate encode params, but the holding-dir requirement is a run-time
         // concern: `finalize_config` injects the managed holding path when a run
         // starts, so a stored profile legitimately keeps `holding_dir = None` even
@@ -121,6 +190,7 @@ mod tests {
             name: name.into(),
             roots: vec![PathBuf::from("/movies")],
             profile: Config::default(),
+            watch: WatchConfig::default(),
             created_at: 1.0,
             updated_at: 1.0,
         }
@@ -164,6 +234,7 @@ mod tests {
             name: "  Movies  ".into(),
             roots: vec![],
             profile: Config::default(),
+            watch: WatchConfig::default(),
             created_at: 0.0,
             updated_at: 0.0,
         };
@@ -210,6 +281,53 @@ mod tests {
         let n = raw.normalized().unwrap();
         // The stored profile stays machine-independent (no placeholder leaked in).
         assert!(n.profile.holding_dir.is_none());
+    }
+
+    #[test]
+    fn default_library_is_unwatched() {
+        assert!(!WatchConfig::default().enabled);
+        // Idle-only is the safe default: unattended work stays out of the user's way.
+        assert!(WatchConfig::default().idle_only);
+    }
+
+    #[test]
+    fn normalized_clamps_interval_below_the_floor() {
+        let mut raw = lib("a", "A");
+        raw.watch.enabled = true;
+        raw.watch.trigger = Trigger::Interval { every_mins: 1 };
+        let n = raw.normalized().unwrap();
+        assert_eq!(
+            n.watch.trigger,
+            Trigger::Interval {
+                every_mins: MIN_INTERVAL_MINS
+            }
+        );
+    }
+
+    #[test]
+    fn normalized_rejects_an_impossible_daily_time() {
+        let mut raw = lib("a", "A");
+        raw.watch.trigger = Trigger::Daily {
+            hour: 25,
+            minute: 0,
+        };
+        assert!(raw.normalized().is_err());
+    }
+
+    #[test]
+    fn watch_defaults_when_absent_from_json() {
+        // A library persisted before 1.2.0 has no `watch` key; it must round-trip
+        // as unwatched rather than fail to parse.
+        let json = r#"{
+            "id": "old",
+            "name": "Legacy",
+            "roots": ["/movies"],
+            "profile": {},
+            "created_at": 1.0,
+            "updated_at": 1.0
+        }"#;
+        let parsed: SavedLibrary = serde_json::from_str(json).unwrap();
+        assert!(!parsed.watch.enabled);
     }
 
     #[test]

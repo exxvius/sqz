@@ -43,11 +43,22 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 walkdir = "2"
+# Local wall-clock conversion for Daily unattended schedules (already in the tree
+# via iana-time-zone; the `clock` default feature gives us `Local`).
+chrono = "0.4"
 
 # Linux ffmpeg builds ship as .tar.xz; other platforms use zip.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 tar = "0.4"
 xz2 = "0.1"
+
+# System input-idle probe for unattended mode (GetLastInputInfo). Windows only;
+# other platforms report "always idle" and never link this.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_SystemInformation",
+] }
 
 [features]
 # Enable custom protocol in production; keep default off for dev.
