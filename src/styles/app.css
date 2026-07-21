@@ -246,6 +246,7 @@
 /* Applies to standalone cards and each per-file card (.live-card, .ecard), but
    NOT to list-holder cards (.card-flat), whose children are the real cards. */
 .card:not(.card-flat),
+.card-flat.card-glow,
 .live-card,
 .ecard,
 .dropzone {
@@ -257,6 +258,7 @@
    --glow (cursor-proximity, set in lib/cursor.ts), so the edge facing the cursor
    lights up even when the pointer is outside the card — no :hover needed. */
 .card:not(.card-flat)::after,
+.card-flat.card-glow::after,
 .live-card::after,
 .ecard::after,
 .dropzone::after {
@@ -618,6 +620,16 @@
   margin: 0;
   opacity: 0; /* invisible: drives the value, a11y, and the hit area */
   cursor: pointer;
+}
+/* Locked: a disabled lock-fence fieldset disables the underlying range input,
+   but the custom fill/thumb are separate elements — dim the whole slider so it
+   reads as inactive, matching the other disabled controls. */
+.vmaf-slider:has(input:disabled) {
+  opacity: 0.5;
+}
+.vmaf-slider:has(input:disabled) .range,
+.vmaf-slider:has(input:disabled) .range input[type="range"] {
+  cursor: not-allowed;
 }
 @media (prefers-reduced-motion: reduce) {
   .vmaf-slider .range-fill,
@@ -1111,6 +1123,18 @@
 }
 .field label {
   color: var(--text-dim);
+}
+/* A stacked field: label on its own line, controls below it and left-aligned
+   (instead of the default label-left / control-right row). Used for the library
+   editor's folder list so it reads like the Home sources list. */
+.field.field-stack {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--space-3);
+}
+.field.field-stack .queue {
+  width: 100%;
 }
 .field input[type="number"],
 .field select {

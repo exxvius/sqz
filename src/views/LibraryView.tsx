@@ -9,7 +9,7 @@ import {
   PlayIcon,
   SearchIcon,
 } from "../components/icons";
-import { api, openFile, pickInputs, revealFile } from "../lib/api";
+import { api, openFile, revealFile } from "../lib/api";
 import { defaultConfig } from "../lib/config";
 import { currentPath, fileName, humanBytes, pct, relativeTime } from "../lib/format";
 import { healthMeta, statusMeta } from "../lib/status";
@@ -43,19 +43,14 @@ const HEALTH_CHIPS: { id: HealthState; label: string }[] = [
 ];
 
 const PAGE_SIZE = 25;
-const ROOTS_KEY = "sqz-library-roots";
 
-function loadRoots(): string[] {
-  try {
-    const saved = localStorage.getItem(ROOTS_KEY);
-    if (saved) return JSON.parse(saved) as string[];
-  } catch {
-    /* ignore */
-  }
-  return [];
+interface Props {
+  config: RunConfig;
+  /** Switch the app to the Live tab (called when a run is kicked off). */
+  goDashboard: () => void;
 }
 
-export function LibraryView({ config }: { config: RunConfig }) {
+export function LibraryView({ goDashboard }: Props) {
   const { locked, maskName, maskPath } = useLock();
   const { confirm, element: confirmModal } = useConfirm();
   // Scan state lives in the shared store so its progress survives leaving and
@@ -63,7 +58,6 @@ export function LibraryView({ config }: { config: RunConfig }) {
   const store = useStore();
   const { scanning, scanDeep, scanProgress, scanError } = store;
   const [library, setLibrary] = useState<Library | null>(null);
-  const [roots, setRoots] = useState<string[]>(loadRoots);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [filters, setFilters] = useState<Set<HealthState>>(new Set());
@@ -75,10 +69,6 @@ export function LibraryView({ config }: { config: RunConfig }) {
   }, []);
 
   useEffect(refreshLibraries, [refreshLibraries]);
-
-  useEffect(() => {
-    localStorage.setItem(ROOTS_KEY, JSON.stringify(roots));
-  }, [roots]);
 
   useEffect(() => setPage(0), [search, filters]);
 
@@ -113,24 +103,13 @@ export function LibraryView({ config }: { config: RunConfig }) {
     wasRunning.current = running;
   }, [running, refresh]);
 
-  const addFolders = async () => {
-    const picked = await pickInputs(true);
-    if (picked.length === 0) return;
-    setRoots((prev) => [...new Set([...prev, ...picked])]);
-  };
-
-  const removeRoot = (root: string) => setRoots((prev) => prev.filter((r) => r !== root));
-
-  const runScan = (deep: boolean) => {
-    if (roots.length === 0 || scanning) return;
-    store.startScan({ ...config, inputs: roots }, deep);
-  };
-
   // A library encodes to its own embedded profile: profile + roots → the
-  // existing run/scan paths.
+  // existing run/scan paths. Kicking off a run jumps to the Live tab so the
+  // encode is visible immediately.
   const runLibrary = (lib: SavedLibrary) => {
     if (store.running) return;
     store.start({ ...lib.profile, inputs: lib.roots });
+    goDashboard();
   };
   const scanLibrary = (lib: SavedLibrary, deep: boolean) => {
     if (scanning) return;
@@ -145,10 +124,6 @@ export function LibraryView({ config }: { config: RunConfig }) {
     created_at: 0,
     updated_at: 0,
   });
-
-  // "Save as library" captures the current ad-hoc folders + active config.
-  const saveCurrentAsLibrary = () =>
-    setEditing({ ...newLibrary(), roots, profile: { ...config, inputs: [] } });
 
   const saveLibrary = async (lib: SavedLibrary) => {
     await api.saveLibrary(lib);
@@ -193,8 +168,6 @@ export function LibraryView({ config }: { config: RunConfig }) {
   const clampedPage = Math.min(page, totalPages - 1);
   const pageStart = clampedPage * PAGE_SIZE;
   const pageRows = allRows.slice(pageStart, pageStart + PAGE_SIZE);
-
-  const flagged = (counts["corrupt"] ?? 0) + (counts["unreadable"] ?? 0);
 
   // Every Library row is a scanned file, so all are removable. Removing just
   // clears the health record (and deletes scan-only rows) — it never touches
@@ -253,7 +226,7 @@ export function LibraryView({ config }: { config: RunConfig }) {
       </div>
 
       {!locked && (
-        <div className="card card-flat">
+        <div className="card card-flat card-glow">
           <div className="history-toolbar">
             <h3 style={{ margin: 0, fontSize: "var(--text-lg)" }}>Saved libraries</h3>
             <div className="grow" />
@@ -264,8 +237,8 @@ export function LibraryView({ config }: { config: RunConfig }) {
 
           {libraries.length === 0 ? (
             <p className="muted" style={{ margin: "var(--space-3) 0 0" }}>
-              Save a folder set with its own encode target (movies vs. phone clips), then re-run it
-              in one click. Add folders below and choose “Save as library”, or start a new one.
+              No saved libraries yet. Create one with its own encode target (movies vs. phone clips
+              vs. VR), then run or health-check it in one click with “New library”.
             </p>
           ) : (
             <div className="lib-list" style={{ marginTop: "var(--space-3)" }}>
@@ -295,6 +268,14 @@ export function LibraryView({ config }: { config: RunConfig }) {
                     >
                       <SearchIcon /> Scan
                     </button>
+                    <button
+                      className="mini-btn"
+                      onClick={() => scanLibrary(lib, true)}
+                      disabled={scanning || lib.roots.length === 0}
+                      title="Decode each file to catch silent corruption (slower)"
+                    >
+                      <DeepScanIcon /> Deep scan
+                    </button>
                     <button className="mini-btn" onClick={() => setEditing(lib)}>
                       Edit
                     </button>
@@ -309,104 +290,39 @@ export function LibraryView({ config }: { config: RunConfig }) {
         </div>
       )}
 
-      {locked ? (
+      {scanning && (
         <div className="card card-flat">
-          <div className="empty">Scanning is disabled while the app is locked.</div>
-        </div>
-      ) : (
-        <div className="card card-flat">
-          <div className="history-toolbar">
-            <button className="mini-btn" onClick={addFolders} disabled={scanning}>
-              <FolderIcon /> Add folder
-            </button>
-            {roots.length > 0 && (
-              <button
-                className="mini-btn"
-                onClick={saveCurrentAsLibrary}
-                disabled={scanning}
-                title="Save these folders and the current settings as a named library"
-              >
-                <LibraryIcon /> Save as library
-              </button>
-            )}
-            <div className="grow" />
-            {!scanning && flagged > 0 && (
+          <div className="scan-progress">
+            <div className="scan-progress-head">
+              <span>{scanDeep ? "Deep scanning" : "Scanning"}…</span>
               <span className="muted">
-                {flagged} file{flagged === 1 ? "" : "s"} flagged
+                {scanProgress
+                  ? `${scanProgress.scanned} / ${scanProgress.total}${
+                      scanProgress.total > 0 ? ` · ${pct(scanFrac)}` : ""
+                    }`
+                  : "preparing…"}
               </span>
+            </div>
+            <div className="bar" style={{ ["--p" as string]: scanFrac }}>
+              <span />
+            </div>
+            {scanProgress && (
+              <div
+                className="scan-progress-file muted"
+                title={locked ? undefined : scanProgress.path}
+              >
+                {maskName(fileName(scanProgress.path))}
+              </div>
             )}
-            <button
-              className="mini-btn"
-              onClick={() => runScan(false)}
-              disabled={scanning || roots.length === 0}
-            >
-              <SearchIcon /> Scan
-            </button>
-            <button
-              className="mini-btn"
-              onClick={() => runScan(true)}
-              disabled={scanning || roots.length === 0}
-              title="Decode each file to catch silent corruption (slower)"
-            >
-              <DeepScanIcon /> Deep scan
-            </button>
           </div>
+        </div>
+      )}
 
-          {roots.length > 0 ? (
-            <div className="queue" style={{ marginTop: "var(--space-3)" }}>
-              {roots.map((r) => (
-                <div className="queue-row" key={r}>
-                  <span className="path" title={locked ? maskPath(r) : r}>
-                    {maskPath(r)}
-                  </span>
-                  <button
-                    className="rm"
-                    onClick={() => removeRoot(r)}
-                    disabled={scanning}
-                    aria-label="Remove folder"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted" style={{ margin: "var(--space-3) 0 0" }}>
-              Add one or more folders, then Scan to check their health.
-            </p>
-          )}
-
-          {scanning && (
-            <div className="scan-progress">
-              <div className="scan-progress-head">
-                <span>{scanDeep ? "Deep scanning" : "Scanning"}…</span>
-                <span className="muted">
-                  {scanProgress
-                    ? `${scanProgress.scanned} / ${scanProgress.total}${
-                        scanProgress.total > 0 ? ` · ${pct(scanFrac)}` : ""
-                      }`
-                    : "preparing…"}
-                </span>
-              </div>
-              <div className="bar" style={{ ["--p" as string]: scanFrac }}>
-                <span />
-              </div>
-              {scanProgress && (
-                <div
-                  className="scan-progress-file muted"
-                  title={locked ? undefined : scanProgress.path}
-                >
-                  {maskName(fileName(scanProgress.path))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {!scanning && scanError && (
-            <p className="hw-note warn" style={{ marginTop: "var(--space-3)" }}>
-              {scanError}
-            </p>
-          )}
+      {!scanning && scanError && (
+        <div className="card card-flat">
+          <p className="hw-note warn" style={{ margin: 0 }}>
+            {scanError}
+          </p>
         </div>
       )}
 

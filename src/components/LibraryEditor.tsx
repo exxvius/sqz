@@ -68,7 +68,7 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
           />
         </div>
 
-        <div className="field">
+        <div className="field field-stack">
           <label>Folders</label>
           {roots.length > 0 ? (
             <div className="queue">
@@ -92,7 +92,7 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
               Add at least one folder for this library.
             </p>
           )}
-          <button className="mini-btn" onClick={addFolders} style={{ marginTop: "var(--space-2)" }}>
+          <button className="mini-btn" onClick={addFolders}>
             + Add folder
           </button>
         </div>

@@ -36,8 +36,8 @@ type View = "home" | "dashboard" | "library" | "history" | "settings";
 
 const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[] = [
   { id: "home", label: "Home", icon: HomeIcon },
-  { id: "dashboard", label: "Live", icon: LiveIcon },
   { id: "library", label: "Library", icon: LibraryIcon },
+  { id: "dashboard", label: "Live", icon: LiveIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -168,7 +168,7 @@ function Shell() {
       case "dashboard":
         return <DashboardView />;
       case "library":
-        return <LibraryView config={config} />;
+        return <LibraryView config={config} goDashboard={() => setView("dashboard")} />;
       case "history":
         return <HistoryView />;
       case "settings":
