@@ -54,6 +54,15 @@ export function NewLibraryIcon({ size = 18 }: IconProps) {
   );
 }
 
+/** Bracketed eye — the "watch this library" (unattended) toggle. */
+export function WatchIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M1 23v-5h2v3h3v2zm17 0v-2h3v-3h2v5zm-6-4.5q-3 0-5.437-1.775T3 12q1.125-2.95 3.563-4.725T12 5.5t5.438 1.775T21 12q-1.125 2.95-3.562 4.725T12 18.5m0-2q2.2 0 4.025-1.2t2.8-3.3q-.975-2.1-2.8-3.3T12 7.5T7.975 8.7t-2.8 3.3q.975 2.1 2.8 3.3T12 16.5m0-1q1.45 0 2.475-1.025T15.5 12t-1.025-2.475T12 8.5T9.525 9.525T8.5 12t1.025 2.475T12 15.5m0-2q-.625 0-1.063-.437T10.5 12t.438-1.062T12 10.5t1.063.438T13.5 12t-.437 1.063T12 13.5M1 6V1h5v2H3v3zm20 0V3h-3V1h5v5z" />
+    </svg>
+  );
+}
+
 /** Circular arrow — retry a failed file. */
 export function RetryIcon({ size = 15 }: IconProps) {
   return (
@@ -237,7 +246,14 @@ export function NoGainIcon({ size = 16 }: IconProps) {
  *  so it starts spinning the instant it renders, with no first-frame delay. */
 export function ProcessingIcon({ size = 16 }: IconProps) {
   return (
-    <svg className="spin" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg
+      className="spin"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
       <path
         d="M12 3c4.97 0 9 4.03 9 9"
         stroke="currentColor"
@@ -252,7 +268,13 @@ export function ProcessingIcon({ size = 16 }: IconProps) {
 /** Wave — a lean / marginal (skipped) status symbol. */
 export function LeanIcon({ size = 16 }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 256 256" fill="currentColor" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 256 256"
+      fill="currentColor"
+      aria-hidden
+    >
       <path d="M225.35 133.1c-15.22 18.93-30.43 29-46.5 30.65a47 47 0 0 1-4.85.25c-20.81 0-38.16-14.13-53.59-26.7c-14.24-11.6-27.68-22.54-40.75-21.18c-9.26 1-19.46 8.32-30.32 21.82a12 12 0 0 1-18.7-15C45.87 104 61.08 94 77.15 92.25c23-2.42 41.82 12.92 58.43 26.45c14.24 11.6 27.68 22.54 40.75 21.18c9.26-1 19.46-8.32 30.32-21.82a12 12 0 1 1 18.7 15Z" />
     </svg>
   );
@@ -261,7 +283,13 @@ export function LeanIcon({ size = 16 }: IconProps) {
 /** Small hollow ring — a pending status symbol. */
 export function PendingIcon({ size = 16 }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 15 15"
+      fill="currentColor"
+      aria-hidden
+    >
       <path d="M7.5 4.875a2.625 2.625 0 1 1 0 5.25a2.625 2.625 0 0 1 0-5.25m0 1a1.625 1.625 0 1 0 0 3.25a1.625 1.625 0 0 0 0-3.25" />
     </svg>
   );
@@ -270,7 +298,13 @@ export function PendingIcon({ size = 16 }: IconProps) {
 /** Small solid dot — a dry-run ("would encode") status symbol. */
 export function DryRunIcon({ size = 16 }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 15 15"
+      fill="currentColor"
+      aria-hidden
+    >
       <path d="M4.5 7.5a3 3 0 1 0 6 0a3 3 0 1 0-6 0" />
     </svg>
   );
@@ -279,8 +313,18 @@ export function DryRunIcon({ size = 16 }: IconProps) {
 /** Solid dot — a not-yet-scanned library status symbol. */
 export function NotScannedIcon({ size = 16 }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="currentColor" aria-hidden>
-      <path stroke="currentColor" strokeWidth={4} d="M24 33a9 9 0 1 0 0-18a9 9 0 0 0 0 18Z" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path
+        stroke="currentColor"
+        strokeWidth={4}
+        d="M24 33a9 9 0 1 0 0-18a9 9 0 0 0 0 18Z"
+      />
     </svg>
   );
 }
@@ -367,12 +411,32 @@ export function SunIcon({ size = 16 }: IconProps) {
 export function Logo({ size = 22 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="1" y="1" width="22" height="22" rx="6" fill="var(--accent-quiet)" />
-      <g stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none">
+      <rect
+        x="1"
+        y="1"
+        width="22"
+        height="22"
+        rx="6"
+        fill="var(--accent-quiet)"
+      />
+      <g
+        stroke="var(--accent)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      >
         <path d="M7 7 12 10.6 17 7" />
         <path d="M7 17 12 13.4 17 17" />
       </g>
-      <rect x="7" y="11.2" width="10" height="1.6" rx="0.8" fill="var(--accent)" />
+      <rect
+        x="7"
+        y="11.2"
+        width="10"
+        height="1.6"
+        rx="0.8"
+        fill="var(--accent)"
+      />
     </svg>
   );
 }

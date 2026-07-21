@@ -12,7 +12,11 @@ export function Switch({ checked, onChange, label, hint }: SwitchProps) {
     <div className="field">
       <label>
         {label}
-        {hint && <div className="muted" style={{ fontSize: "var(--text-xs)" }}>{hint}</div>}
+        {hint && (
+          <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+            {hint}
+          </div>
+        )}
       </label>
       <button
         role="switch"
@@ -34,7 +38,14 @@ interface NumberFieldProps {
   onChange: (v: number) => void;
 }
 
-export function NumberField({ label, value, min, max, step, onChange }: NumberFieldProps) {
+export function NumberField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: NumberFieldProps) {
   return (
     <div className="field">
       <label>{label}</label>

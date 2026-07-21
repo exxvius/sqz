@@ -19,7 +19,10 @@ import {
   SunIcon,
   UnlockIcon,
 } from "./components/icons";
-import { PasswordModal, type PasswordModalMode } from "./components/PasswordModal";
+import {
+  PasswordModal,
+  type PasswordModalMode,
+} from "./components/PasswordModal";
 import { CloseWarningModal } from "./components/CloseWarningModal";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StoreProvider, useStore } from "./lib/store";
@@ -34,7 +37,11 @@ import type { ComponentType } from "react";
 
 type View = "home" | "dashboard" | "library" | "history" | "settings";
 
-const NAV: { id: View; label: string; icon: ComponentType<{ size?: number }> }[] = [
+const NAV: {
+  id: View;
+  label: string;
+  icon: ComponentType<{ size?: number }>;
+}[] = [
   { id: "home", label: "Home", icon: HomeIcon },
   { id: "library", label: "Library", icon: LibraryIcon },
   { id: "dashboard", label: "Live", icon: LiveIcon },
@@ -147,7 +154,10 @@ function Shell() {
     } else if (pwModal === "unlock") {
       await lock.unlock(values.password ?? "");
     } else if (pwModal === "change") {
-      await lock.changePassword(values.oldPassword ?? "", values.newPassword ?? "");
+      await lock.changePassword(
+        values.oldPassword ?? "",
+        values.newPassword ?? "",
+      );
     }
     setPwModal(null);
   };
@@ -168,7 +178,12 @@ function Shell() {
       case "dashboard":
         return <DashboardView />;
       case "library":
-        return <LibraryView config={config} goDashboard={() => setView("dashboard")} />;
+        return (
+          <LibraryView
+            config={config}
+            goDashboard={() => setView("dashboard")}
+          />
+        );
       case "history":
         return <HistoryView />;
       case "settings":
@@ -185,7 +200,18 @@ function Shell() {
           />
         );
     }
-  }, [view, config, theme, toggleTheme, accent, setAccent, closeBehavior, setCloseBehavior, ff, refreshFf]);
+  }, [
+    view,
+    config,
+    theme,
+    toggleTheme,
+    accent,
+    setAccent,
+    closeBehavior,
+    setCloseBehavior,
+    ff,
+    refreshFf,
+  ]);
 
   return (
     <div className="app">
@@ -236,7 +262,11 @@ function Shell() {
             {lock.locked ? <LockIcon size={15} /> : <UnlockIcon size={15} />}
             <span>{lock.locked ? "Locked" : "Lock"}</span>
           </button>
-          <button className="foot-btn" onClick={toggleTheme} disabled={lock.locked}>
+          <button
+            className="foot-btn"
+            onClick={toggleTheme}
+            disabled={lock.locked}
+          >
             {theme === "dark" ? <MoonIcon size={15} /> : <SunIcon size={15} />}
             <span>{theme === "dark" ? "Dark" : "Light"}</span>
           </button>

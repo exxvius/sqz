@@ -71,7 +71,12 @@ export function PasswordModal({ mode, onSubmit, onClose }: Props) {
   };
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+    <div
+      className="overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pw-title"
+    >
       <form className="card pw-modal" onSubmit={submit}>
         <h2 id="pw-title">{copy.title}</h2>
         <p className="muted">{copy.note}</p>
@@ -112,7 +117,12 @@ export function PasswordModal({ mode, onSubmit, onClose }: Props) {
         {error && <div className="err-box">{error}</div>}
 
         <div className="pw-actions">
-          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onClose}
+            disabled={busy}
+          >
             Cancel
           </button>
           <button type="submit" className="btn primary" disabled={busy}>

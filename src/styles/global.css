@@ -64,28 +64,44 @@ textarea,
 .lava i:nth-child(1) {
   left: 20%;
   top: 18%;
-  background: radial-gradient(closest-side, oklch(64% 0.15 var(--accent-h) / 0.06), transparent 70%);
+  background: radial-gradient(
+    closest-side,
+    oklch(64% 0.15 var(--accent-h) / 0.06),
+    transparent 70%
+  );
   translate: calc(var(--par-x) * 22px) calc(var(--par-y) * 18px);
   animation: lava-1 52s ease-in-out infinite;
 }
 .lava i:nth-child(2) {
   left: 82%;
   top: 15%;
-  background: radial-gradient(closest-side, oklch(62% 0.16 calc(var(--accent-h) - 34) / 0.05), transparent 70%);
+  background: radial-gradient(
+    closest-side,
+    oklch(62% 0.16 calc(var(--accent-h) - 34) / 0.05),
+    transparent 70%
+  );
   translate: calc(var(--par-x) * 34px) calc(var(--par-y) * 26px);
   animation: lava-2 64s ease-in-out infinite;
 }
 .lava i:nth-child(3) {
   left: 84%;
   top: 84%;
-  background: radial-gradient(closest-side, oklch(60% 0.16 calc(var(--accent-h) + 54) / 0.05), transparent 70%);
+  background: radial-gradient(
+    closest-side,
+    oklch(60% 0.16 calc(var(--accent-h) + 54) / 0.05),
+    transparent 70%
+  );
   translate: calc(var(--par-x) * 28px) calc(var(--par-y) * 22px);
   animation: lava-3 57s ease-in-out infinite;
 }
 .lava i:nth-child(4) {
   left: 16%;
   top: 82%;
-  background: radial-gradient(closest-side, oklch(66% 0.15 calc(var(--accent-h) + 24) / 0.045), transparent 70%);
+  background: radial-gradient(
+    closest-side,
+    oklch(66% 0.15 calc(var(--accent-h) + 24) / 0.045),
+    transparent 70%
+  );
   translate: calc(var(--par-x) * 42px) calc(var(--par-y) * 32px);
   animation: lava-4 74s ease-in-out infinite;
 }

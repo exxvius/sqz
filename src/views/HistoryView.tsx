@@ -67,7 +67,11 @@ export function HistoryView() {
   useEffect(() => setPage(0), [search, statuses]);
 
   const filter = useCallback(
-    () => ({ search: search || undefined, statuses: [...statuses], limit: 1000 }),
+    () => ({
+      search: search || undefined,
+      statuses: [...statuses],
+      limit: 1000,
+    }),
     [search, statuses],
   );
 
@@ -132,7 +136,9 @@ export function HistoryView() {
     if (!dest) return;
     const format = dest.toLowerCase().endsWith(".json") ? "json" : "csv";
     const n = await api.exportHistory(dest, format, filter());
-    await message(`Exported ${n} row${n === 1 ? "" : "s"}.`, { title: "Export complete" });
+    await message(`Exported ${n} row${n === 1 ? "" : "s"}.`, {
+      title: "Export complete",
+    });
   };
 
   const counts = history?.counts ?? {};
@@ -149,22 +155,31 @@ export function HistoryView() {
     <div className="view">
       <div className="view-head">
         <h2>History</h2>
-        <p>Every file sqz has read or touched. Search, filter, retry, or clean it up.</p>
+        <p>
+          Every file sqz has read or touched. Search, filter, retry, or clean it
+          up.
+        </p>
       </div>
 
       <div className="card">
         <div className="meter">
-          <span className="num">{humanBytes(history?.total_reclaimed ?? 0)}</span>
+          <span className="num">
+            {humanBytes(history?.total_reclaimed ?? 0)}
+          </span>
           <span className="muted">reclaimed all-time</span>
         </div>
         {history && (
           <div className="stat-row">
             <div className="stat">
-              <span className="v">{fmtDurationLong(history.encode_seconds)}</span>
+              <span className="v">
+                {fmtDurationLong(history.encode_seconds)}
+              </span>
               <span className="k">Time encoding</span>
             </div>
             <div className="stat">
-              <span className="v">{fmtRate(history.total_reclaimed, history.encode_seconds)}</span>
+              <span className="v">
+                {fmtRate(history.total_reclaimed, history.encode_seconds)}
+              </span>
               <span className="k">Efficiency</span>
             </div>
             <div className="stat">
@@ -176,7 +191,9 @@ export function HistoryView() {
               <span className="k">Avg reduction</span>
             </div>
             <div className="stat">
-              <span className="v">{history.files_encoded.toLocaleString()}</span>
+              <span className="v">
+                {history.files_encoded.toLocaleString()}
+              </span>
               <span className="k">Re-encoded</span>
             </div>
             <div className="stat">
@@ -188,7 +205,9 @@ export function HistoryView() {
               <span className="k">Avg / file</span>
             </div>
             <div className="stat">
-              <span className="v">{history.files_touched.toLocaleString()}</span>
+              <span className="v">
+                {history.files_touched.toLocaleString()}
+              </span>
               <span className="k">Files tracked</span>
             </div>
           </div>
@@ -199,7 +218,9 @@ export function HistoryView() {
         <div className="filterbar">
           <input
             className="search"
-            placeholder={locked ? "Search disabled while locked" : "Search by path…"}
+            placeholder={
+              locked ? "Search disabled while locked" : "Search by path…"
+            }
             value={locked ? "" : search}
             disabled={locked}
             onChange={(e) => setSearch(e.target.value)}
@@ -279,12 +300,18 @@ export function HistoryView() {
                   </>
                 )}
                 {retryable(r.status) && (
-                  <button className="mini-btn" onClick={() => act(api.retryFile(r.path))}>
+                  <button
+                    className="mini-btn"
+                    onClick={() => act(api.retryFile(r.path))}
+                  >
                     <RetryIcon /> Retry
                   </button>
                 )}
                 {forceable(r.status) && (
-                  <button className="mini-btn" onClick={() => act(api.forceFile(r.path))}>
+                  <button
+                    className="mini-btn"
+                    onClick={() => act(api.forceFile(r.path))}
+                  >
                     <ForceIcon /> Force process
                   </button>
                 )}
@@ -311,7 +338,13 @@ export function HistoryView() {
                 name={maskName(fileName(r.path))}
                 fullPath={locked ? undefined : r.path}
                 tag={m.label}
-                meta={savedTag ?? <span className="ecard-meta">{relativeTime(r.updated_at)}</span>}
+                meta={
+                  savedTag ?? (
+                    <span className="ecard-meta">
+                      {relativeTime(r.updated_at)}
+                    </span>
+                  )
+                }
                 actions={actions}
               >
                 <dl className="kv-grid">
@@ -350,7 +383,9 @@ export function HistoryView() {
                   <dd>{relativeTime(r.updated_at)}</dd>
                 </dl>
 
-                {r.status === "failed" && r.error && <div className="err-box">{r.error}</div>}
+                {r.status === "failed" && r.error && (
+                  <div className="err-box">{r.error}</div>
+                )}
                 {r.fallback && <div className="note-box">⚠ {r.fallback}</div>}
               </StatusCard>
             );

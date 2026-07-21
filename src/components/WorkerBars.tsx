@@ -15,7 +15,8 @@ interface Derived {
 }
 
 function derive(f: ActiveFile, minSavings: number): Derived {
-  const progress = f.duration && f.duration > 0 ? Math.min(f.sec / f.duration, 1) : 0;
+  const progress =
+    f.duration && f.duration > 0 ? Math.min(f.sec / f.duration, 1) : 0;
   if (!f.outBytes || progress <= 0) {
     return { progress, projected: null, klass: "", label: "estimating…" };
   }
@@ -33,7 +34,8 @@ export function WorkerBars({ active, minSavings }: Props) {
   if (active.length === 0) {
     return (
       <div className="empty">
-        No active encodes. Add videos on the Home tab and press <strong>Start</strong>.
+        No active encodes. Add videos on the Home tab and press{" "}
+        <strong>Start</strong>.
       </div>
     );
   }

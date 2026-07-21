@@ -19,6 +19,7 @@ import type {
   QualityProgress,
   QualityResolved,
   RunConfig,
+  RunSourceInfo,
   RunSummary,
 } from "./types";
 
@@ -71,6 +72,8 @@ interface State {
   active: Record<string, ActiveFile>;
   log: LogEntry[];
   summary: RunSummary | null;
+  /** Source of the current run: manual, or an unattended run of a named library. */
+  runSource: RunSourceInfo | null;
   session: {
     saved: number;
     done: number;
@@ -90,7 +93,13 @@ type Action =
   | { type: "SET_RUNNING"; running: boolean }
   | { type: "SET_PAUSED"; paused: boolean }
   | { type: "RUN_START"; minSavings: number; total: number }
-  | { type: "FILE_START"; path: string; name: string; duration: number | null; srcSize: number }
+  | {
+      type: "FILE_START";
+      path: string;
+      name: string;
+      duration: number | null;
+      srcSize: number;
+    }
   | { type: "FILE_PROGRESS"; p: FileProgress }
   | { type: "HEALTH_CHECK"; p: QualityProgress }
   | { type: "QUALITY_PROGRESS"; p: QualityProgress }
@@ -98,6 +107,7 @@ type Action =
   | { type: "FILE_END"; path: string }
   | { type: "RECORD"; result: ProcessResult }
   | { type: "RUN_DONE"; summary: RunSummary }
+  | { type: "RUN_SOURCE"; info: RunSourceInfo }
   | { type: "CLEAR_LOG" }
   | { type: "SCAN_START"; deep: boolean }
   | { type: "SCAN_PROGRESS"; p: HealthProgress }
@@ -123,6 +133,7 @@ const initial: State = {
   active: {},
   log: [],
   summary: null,
+  runSource: null,
   session: emptySession(),
   scanning: false,
   scanDeep: false,
@@ -184,7 +195,10 @@ function reducer(state: State, action: Action): State {
       const frac = Math.min(action.p.frac, 0.99);
       return {
         ...state,
-        active: { ...state.active, [action.p.path]: { ...f, healthFrac: frac } },
+        active: {
+          ...state.active,
+          [action.p.path]: { ...f, healthFrac: frac },
+        },
       };
     }
     case "FILE_PROGRESS": {
@@ -264,7 +278,12 @@ function reducer(state: State, action: Action): State {
         ...state,
         active: {
           ...state.active,
-          [action.p.path]: { ...f, qualityNote: note, searchFrac: null, searchEta: null },
+          [action.p.path]: {
+            ...f,
+            qualityNote: note,
+            searchFrac: null,
+            searchEta: null,
+          },
         },
       };
     }
@@ -300,23 +319,46 @@ function reducer(state: State, action: Action): State {
       } else if (r.outcome.startsWith("skipped")) {
         session.skipped += 1;
       }
-      return { ...state, log: [entry, ...state.log].slice(0, LOG_CAP), session };
+      return {
+        ...state,
+        log: [entry, ...state.log].slice(0, LOG_CAP),
+        session,
+      };
     }
     case "RUN_DONE":
-      return { ...state, running: false, paused: false, summary: action.summary };
+      return {
+        ...state,
+        running: false,
+        paused: false,
+        summary: action.summary,
+        runSource: null,
+      };
+    case "RUN_SOURCE":
+      return { ...state, runSource: action.info };
     case "CLEAR_LOG":
       // Visually clears the on-screen event log only — the manifest DB (History
       // tab) is untouched.
       return { ...state, log: [] };
     case "SCAN_START":
-      return { ...state, scanning: true, scanDeep: action.deep, scanProgress: null, scanError: null };
+      return {
+        ...state,
+        scanning: true,
+        scanDeep: action.deep,
+        scanProgress: null,
+        scanError: null,
+      };
     case "SCAN_PROGRESS":
       // A late progress tick from a finished/failed scan must not revive the bar.
       return state.scanning ? { ...state, scanProgress: action.p } : state;
     case "SCAN_END":
       return { ...state, scanning: false, scanProgress: null };
     case "SCAN_FAIL":
-      return { ...state, scanning: false, scanProgress: null, scanError: action.error };
+      return {
+        ...state,
+        scanning: false,
+        scanProgress: null,
+        scanError: action.error,
+      };
     default:
       return state;
   }
@@ -352,7 +394,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let unlistenHealth: (() => void) | undefined;
     subscribeEngine({
       onRunStart: (total) =>
-        dispatch({ type: "RUN_START", minSavings: pendingMinSavings.current, total }),
+        dispatch({
+          type: "RUN_START",
+          minSavings: pendingMinSavings.current,
+          total,
+        }),
       onFileStart: (p) =>
         dispatch({
           type: "FILE_START",
@@ -368,6 +414,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onFileEnd: (p) => dispatch({ type: "FILE_END", path: p.path }),
       onRecord: (r) => dispatch({ type: "RECORD", result: r }),
       onRunDone: (s) => dispatch({ type: "RUN_DONE", summary: s }),
+      onRunSource: (info) => dispatch({ type: "RUN_SOURCE", info }),
+      onRunPaused: (paused) => dispatch({ type: "SET_PAUSED", paused }),
     }).then((u) => {
       if (disposed) u();
       else unlisten = u;
@@ -383,7 +431,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       else unlistenHealth = u;
     });
 
-    api.isRunning().then((running) => dispatch({ type: "SET_RUNNING", running }));
+    api
+      .isRunning()
+      .then((running) => dispatch({ type: "SET_RUNNING", running }));
 
     return () => {
       disposed = true;
@@ -421,7 +471,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           await api.scanHealth(config, deep);
           dispatch({ type: "SCAN_END" });
         } catch (e) {
-          dispatch({ type: "SCAN_FAIL", error: e instanceof Error ? e.message : "Scan failed." });
+          dispatch({
+            type: "SCAN_FAIL",
+            error: e instanceof Error ? e.message : "Scan failed.",
+          });
         }
       },
       // Flip the backend cancel token; the scan resolves (cancelled) and the
@@ -431,7 +484,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [state],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return (
+    <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+  );
 }
 
 export function useStore(): StoreValue {

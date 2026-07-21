@@ -42,6 +42,16 @@ pub struct RunSourceInfo {
     pub library_name: Option<String>,
 }
 
+/// Emitted when the supervisor auto-pauses or auto-resumes an unattended run in
+/// response to the machine becoming active/idle, so the UI reflects the state the
+/// user didn't set by hand.
+pub const EV_RUN_PAUSED: &str = "sqz-run-paused";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunPaused {
+    pub paused: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStart {
     pub total: usize,

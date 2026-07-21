@@ -39,7 +39,11 @@ export function ConfirmModal({
           <button className="btn ghost" onClick={onCancel}>
             {cancelLabel}
           </button>
-          <button className={`btn${danger ? " danger" : " primary"}`} onClick={onConfirm} autoFocus>
+          <button
+            className={`btn${danger ? " danger" : " primary"}`}
+            onClick={onConfirm}
+            autoFocus
+          >
             {confirmLabel}
           </button>
         </div>
@@ -72,7 +76,11 @@ export function useConfirm() {
   };
 
   const element = opts ? (
-    <ConfirmModal {...opts} onConfirm={() => finish(true)} onCancel={() => finish(false)} />
+    <ConfirmModal
+      {...opts}
+      onConfirm={() => finish(true)}
+      onCancel={() => finish(false)}
+    />
   ) : null;
 
   return { confirm, element };

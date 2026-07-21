@@ -40,14 +40,22 @@ export function DropZone({ onAdd, disabled }: Props) {
     <div className={`dropzone${over ? " over" : ""}`}>
       <div className="big">Drop videos or folders here</div>
       <div className="muted">
-        Every file is verified before its original is touched. Nothing is deleted without a smaller,
-        playable replacement.
+        Every file is verified before its original is touched. Nothing is
+        deleted without a smaller, playable replacement.
       </div>
       <div className="dz-actions">
-        <button className="btn" disabled={disabled} onClick={async () => onAdd(await pickInputs(false))}>
+        <button
+          className="btn"
+          disabled={disabled}
+          onClick={async () => onAdd(await pickInputs(false))}
+        >
           Add files
         </button>
-        <button className="btn ghost" disabled={disabled} onClick={async () => onAdd(await pickInputs(true))}>
+        <button
+          className="btn ghost"
+          disabled={disabled}
+          onClick={async () => onAdd(await pickInputs(true))}
+        >
           Add folders
         </button>
       </div>

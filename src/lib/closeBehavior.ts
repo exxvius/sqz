@@ -5,7 +5,10 @@ export type CloseBehavior = "quit" | "tray";
 
 const KEY = "sqz-close-behavior";
 
-export function useCloseBehavior(): [CloseBehavior, (b: CloseBehavior) => void] {
+export function useCloseBehavior(): [
+  CloseBehavior,
+  (b: CloseBehavior) => void,
+] {
   const [behavior, setBehavior] = useState<CloseBehavior>(() => {
     return localStorage.getItem(KEY) === "tray" ? "tray" : "quit";
   });

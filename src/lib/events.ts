@@ -10,6 +10,7 @@ import type {
   ProcessResult,
   QualityProgress,
   QualityResolved,
+  RunSourceInfo,
   RunSummary,
 } from "./types";
 
@@ -26,6 +27,8 @@ export const EV = {
   projection: "sqz-projection",
   healthProgress: "sqz-health-progress",
   healthDone: "sqz-health-done",
+  runSource: "sqz-run-source",
+  runPaused: "sqz-run-paused",
 } as const;
 
 /** Subscribe to health-scan progress + completion; returns an unlisten fn. */
@@ -34,7 +37,9 @@ export async function subscribeHealth(handlers: {
   onDone?: (s: HealthSummary) => void;
 }): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = await Promise.all([
-    listen<HealthProgress>(EV.healthProgress, (e) => handlers.onProgress?.(e.payload)),
+    listen<HealthProgress>(EV.healthProgress, (e) =>
+      handlers.onProgress?.(e.payload),
+    ),
     listen<HealthSummary>(EV.healthDone, (e) => handlers.onDone?.(e.payload)),
   ]);
   return () => unlisteners.forEach((u) => u());
@@ -52,6 +57,10 @@ export interface EngineHandlers {
   onRecord?: (p: ProcessResult) => void;
   onRunStart?: (total: number) => void;
   onRunDone?: (p: RunSummary) => void;
+  /** A run launched: manual, or an unattended (scheduled) run of a library. */
+  onRunSource?: (info: RunSourceInfo) => void;
+  /** The supervisor auto-paused/resumed an unattended run on machine activity. */
+  onRunPaused?: (paused: boolean) => void;
 }
 
 /** Subscribe to all engine events; returns a single unlisten function. */
@@ -60,12 +69,24 @@ export async function subscribeEngine(h: EngineHandlers): Promise<UnlistenFn> {
     listen<FileStart>(EV.fileStart, (e) => h.onFileStart?.(e.payload)),
     listen<FileProgress>(EV.fileProgress, (e) => h.onFileProgress?.(e.payload)),
     listen<FileEnd>(EV.fileEnd, (e) => h.onFileEnd?.(e.payload)),
-    listen<QualityProgress>(EV.qualityProgress, (e) => h.onQualityProgress?.(e.payload)),
-    listen<QualityResolved>(EV.qualityResolved, (e) => h.onQualityResolved?.(e.payload)),
-    listen<QualityProgress>(EV.gateProgress, (e) => h.onGateProgress?.(e.payload)),
+    listen<QualityProgress>(EV.qualityProgress, (e) =>
+      h.onQualityProgress?.(e.payload),
+    ),
+    listen<QualityResolved>(EV.qualityResolved, (e) =>
+      h.onQualityResolved?.(e.payload),
+    ),
+    listen<QualityProgress>(EV.gateProgress, (e) =>
+      h.onGateProgress?.(e.payload),
+    ),
     listen<ProcessResult>(EV.fileRecord, (e) => h.onRecord?.(e.payload)),
-    listen<{ total: number }>(EV.runStart, (e) => h.onRunStart?.(e.payload.total)),
+    listen<{ total: number }>(EV.runStart, (e) =>
+      h.onRunStart?.(e.payload.total),
+    ),
     listen<RunSummary>(EV.runDone, (e) => h.onRunDone?.(e.payload)),
+    listen<RunSourceInfo>(EV.runSource, (e) => h.onRunSource?.(e.payload)),
+    listen<{ paused: boolean }>(EV.runPaused, (e) =>
+      h.onRunPaused?.(e.payload.paused),
+    ),
   ]);
   return () => unlisteners.forEach((u) => u());
 }

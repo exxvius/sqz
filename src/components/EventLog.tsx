@@ -15,7 +15,9 @@ interface Props {
 export function EventLog({ log, onRetry, onForce }: Props) {
   const { locked, maskName, maskPath } = useLock();
   if (log.length === 0) {
-    return <div className="empty">Events appear here as files are processed.</div>;
+    return (
+      <div className="empty">Events appear here as files are processed.</div>
+    );
   }
 
   // Only the most recent entries are rendered (log is newest-first); thousands

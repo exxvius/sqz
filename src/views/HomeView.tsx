@@ -22,7 +22,13 @@ interface Props {
   goSettings: () => void;
 }
 
-export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Props) {
+export function HomeView({
+  config,
+  setConfig,
+  goDashboard,
+  ff,
+  refreshFf,
+}: Props) {
   const store = useStore();
   const { locked, maskPath } = useLock();
   const [proj, setProj] = useState<ReclaimProjection | null>(null);
@@ -97,7 +103,8 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
   const hasProjection = (proj?.candidate_files ?? 0) > 0;
   const canStart = hasProjection && !store.running && ffReady;
   // The whole bar toggles the breakdown, but only once there's one to show.
-  const canToggleDetails = hasProjection && !!proj && proj.buckets.length > 0 && !refining;
+  const canToggleDetails =
+    hasProjection && !!proj && proj.buckets.length > 0 && !refining;
   const toggleDetails = () => {
     if (canToggleDetails) setDetailsOpen((o) => !o);
   };
@@ -136,8 +143,8 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
             FFmpeg required
           </div>
           <p className="muted" style={{ margin: "0 0 var(--space-2)" }}>
-            sqz needs FFmpeg to encode. Download it in one click (~140&nbsp;MB, kept inside the app),
-            or point sqz at your own binaries.
+            sqz needs FFmpeg to encode. Download it in one click (~140&nbsp;MB,
+            kept inside the app), or point sqz at your own binaries.
           </p>
           <FfmpegSetup ff={ff} onChange={refreshFf} compact />
         </div>
@@ -146,61 +153,72 @@ export function HomeView({ config, setConfig, goDashboard, ff, refreshFf }: Prop
       {/* Everything below is disabled as a unit when the app is locked — a
           disabled fieldset natively disables every control inside it. */}
       <fieldset className="lock-fence" disabled={locked}>
-      <DropZone onAdd={addInputs} disabled={locked} />
+        <DropZone onAdd={addInputs} disabled={locked} />
 
-      {config.inputs.length > 0 && (
-        <div className="card" style={{ marginTop: "var(--space-4)" }}>
-          <div className="row between">
-            <div className="card-title" style={{ margin: 0 }}>
-              {config.inputs.length} source{config.inputs.length > 1 ? "s" : ""}
-            </div>
-            <button className="btn ghost" onClick={() => patch({ inputs: [] })}>
-              <ClearIcon /> Clear
-            </button>
-          </div>
-          <div className="queue" style={{ marginTop: "var(--space-3)" }}>
-            {config.inputs.map((p) => (
-              <div className="queue-row" key={p}>
-                <span className="path" title={locked ? maskPath(p) : p}>
-                  {maskPath(p)}
-                </span>
-                <button className="rm" onClick={() => removeInput(p)} aria-label="Remove">
-                  <RemoveXIcon />
-                </button>
+        {config.inputs.length > 0 && (
+          <div className="card" style={{ marginTop: "var(--space-4)" }}>
+            <div className="row between">
+              <div className="card-title" style={{ margin: 0 }}>
+                {config.inputs.length} source
+                {config.inputs.length > 1 ? "s" : ""}
               </div>
-            ))}
+              <button
+                className="btn ghost"
+                onClick={() => patch({ inputs: [] })}
+              >
+                <ClearIcon /> Clear
+              </button>
+            </div>
+            <div className="queue" style={{ marginTop: "var(--space-3)" }}>
+              {config.inputs.map((p) => (
+                <div className="queue-row" key={p}>
+                  <span className="path" title={locked ? maskPath(p) : p}>
+                    {maskPath(p)}
+                  </span>
+                  <button
+                    className="rm"
+                    onClick={() => removeInput(p)}
+                    aria-label="Remove"
+                  >
+                    <RemoveXIcon />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <QualityPresets
-        codec={config.codec}
-        quality={config.quality}
-        vmafTarget={config.vmaf_target ?? null}
-        vmafSamples={config.vmaf_samples}
-        vmafSampleSecs={config.vmaf_sample_secs}
-        onCodec={(codec) => patch({ codec, encoder_override: null })}
-        onQuality={(quality) => patch({ quality })}
-        onVmafTarget={(vmaf_target) => patch({ vmaf_target })}
-        onVmafSamples={(vmaf_samples) => patch({ vmaf_samples })}
-        onVmafSampleSecs={(vmaf_sample_secs) => patch({ vmaf_sample_secs })}
-      />
+        <QualityPresets
+          codec={config.codec}
+          quality={config.quality}
+          vmafTarget={config.vmaf_target ?? null}
+          vmafSamples={config.vmaf_samples}
+          vmafSampleSecs={config.vmaf_sample_secs}
+          onCodec={(codec) => patch({ codec, encoder_override: null })}
+          onQuality={(quality) => patch({ quality })}
+          onVmafTarget={(vmaf_target) => patch({ vmaf_target })}
+          onVmafSamples={(vmaf_samples) => patch({ vmaf_samples })}
+          onVmafSampleSecs={(vmaf_sample_secs) => patch({ vmaf_sample_secs })}
+        />
 
-      <EncoderPanel
-        codec={config.codec}
-        encoderOverride={config.encoder_override ?? null}
-        onOverride={(name) => patch({ encoder_override: name })}
-        onCodec={(codec) => patch({ codec, encoder_override: null })}
-      />
+        <EncoderPanel
+          codec={config.codec}
+          encoderOverride={config.encoder_override ?? null}
+          onOverride={(name) => patch({ encoder_override: name })}
+          onCodec={(codec) => patch({ codec, encoder_override: null })}
+        />
 
-      <AdvancedOptions config={config} patch={patch} />
+        <AdvancedOptions config={config} patch={patch} />
       </fieldset>
 
       {/* Reserve scroll room *above* the sticky dock for the open breakdown —
           its height plus the card gap it floats above the bar by — so the
           settings can be scrolled clear of it while the bar stays pinned. */}
       {detailsH > 0 && (
-        <div aria-hidden="true" style={{ height: `calc(${detailsH}px + var(--space-4))` }} />
+        <div
+          aria-hidden="true"
+          style={{ height: `calc(${detailsH}px + var(--space-4))` }}
+        />
       )}
 
       <div className="actionbar-dock">

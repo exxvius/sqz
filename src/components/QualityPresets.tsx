@@ -22,10 +22,26 @@ const LENGTH_OPTS = [
 ];
 
 const PRESETS: { id: QualityPreset; name: string; desc: string }[] = [
-  { id: "max-savings", name: "Maximum savings", desc: "Smallest files. Great for archives." },
-  { id: "balanced", name: "Balanced", desc: "Near-transparent, strong savings. Default." },
-  { id: "high-quality", name: "High quality", desc: "Bigger files, very close to source." },
-  { id: "visually-lossless", name: "Visually lossless", desc: "Largest. Only for keepers." },
+  {
+    id: "max-savings",
+    name: "Maximum savings",
+    desc: "Smallest files. Great for archives.",
+  },
+  {
+    id: "balanced",
+    name: "Balanced",
+    desc: "Near-transparent, strong savings. Default.",
+  },
+  {
+    id: "high-quality",
+    name: "High quality",
+    desc: "Bigger files, very close to source.",
+  },
+  {
+    id: "visually-lossless",
+    name: "Visually lossless",
+    desc: "Largest. Only for keepers.",
+  },
 ];
 
 const CODECS: { id: Codec; label: string; note: string }[] = [
@@ -39,7 +55,10 @@ const VMAF_MIN = 90;
 const VMAF_MAX = 99;
 const VMAF_DEFAULT = 95;
 /** Interior click-point notches (one per step, excluding the two endpoints). */
-const TICKS = Array.from({ length: VMAF_MAX - VMAF_MIN + 1 }, (_, i) => i).slice(1, -1);
+const TICKS = Array.from(
+  { length: VMAF_MAX - VMAF_MIN + 1 },
+  (_, i) => i,
+).slice(1, -1);
 /** Magnification falloff width (fraction of the track) around the cursor. */
 const TICK_SIGMA = 0.08;
 
@@ -93,17 +112,23 @@ export function QualityPresets({
             </button>
           ))}
         </div>
-        <span className="muted">{CODECS.find((c) => c.id === codec)?.note}</span>
+        <span className="muted">
+          {CODECS.find((c) => c.id === codec)?.note}
+        </span>
       </div>
 
       {codec === "av1" && (
         <p className="muted compat-note">
-          Heads-up: AV1 can't Direct Play on many older Plex, TV, and browser clients — they may
-          transcode or fail to play. Great for archives; check your playback devices first.
+          Heads-up: AV1 can't Direct Play on many older Plex, TV, and browser
+          clients — they may transcode or fail to play. Great for archives;
+          check your playback devices first.
         </p>
       )}
 
-      <div className={`presets${vmafOn ? " inactive" : ""}`} aria-disabled={vmafOn}>
+      <div
+        className={`presets${vmafOn ? " inactive" : ""}`}
+        aria-disabled={vmafOn}
+      >
         {PRESETS.map((p) => (
           <button
             key={p.id}
@@ -140,7 +165,9 @@ export function QualityPresets({
                   {
                     // Position of the fill edge + knob along the track.
                     "--fill": `${
-                      (((vmafTarget ?? VMAF_DEFAULT) - VMAF_MIN) / (VMAF_MAX - VMAF_MIN)) * 100
+                      (((vmafTarget ?? VMAF_DEFAULT) - VMAF_MIN) /
+                        (VMAF_MAX - VMAF_MIN)) *
+                      100
                     }%`,
                   } as CSSProperties
                 }
@@ -165,7 +192,12 @@ export function QualityPresets({
                     return (
                       <span
                         key={i}
-                        style={{ left: `${pos * 100}%`, "--mag": mag.toFixed(3) } as CSSProperties}
+                        style={
+                          {
+                            left: `${pos * 100}%`,
+                            "--mag": mag.toFixed(3),
+                          } as CSSProperties
+                        }
                       />
                     );
                   })}
@@ -174,16 +206,16 @@ export function QualityPresets({
               </div>
             </div>
             <div className="muted vmaf-hint">
-              95 is near-transparent. Higher targets keep more quality but reclaim less; the
-              per-title search picks the CRF that hits it.
+              95 is near-transparent. Higher targets keep more quality but
+              reclaim less; the per-title search picks the CRF that hits it.
             </div>
 
             <div className="field vmaf-sampling">
               <label>
                 Sampling
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  More / longer samples judge the whole title better but slow the search. Auto
-                  scales to the source resolution.
+                  More / longer samples judge the whole title better but slow
+                  the search. Auto scales to the source resolution.
                 </div>
               </label>
               <div className="row" style={{ gap: "var(--space-2)" }}>

@@ -27,7 +27,11 @@
   font-weight: 700;
   font-size: 1.7rem;
   letter-spacing: -0.02em;
-  background: linear-gradient(180deg, oklch(92% 0.09 var(--accent-h)), var(--accent));
+  background: linear-gradient(
+    180deg,
+    oklch(92% 0.09 var(--accent-h)),
+    var(--accent)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -36,10 +40,14 @@
 @keyframes wordmark-glow {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px color-mix(in oklab, var(--accent) 22%, transparent));
+    filter: drop-shadow(
+      0 0 2px color-mix(in oklab, var(--accent) 22%, transparent)
+    );
   }
   50% {
-    filter: drop-shadow(0 0 12px color-mix(in oklab, var(--accent) 60%, transparent));
+    filter: drop-shadow(
+      0 0 12px color-mix(in oklab, var(--accent) 60%, transparent)
+    );
   }
 }
 /* When a run is processing, the Live menu item shimmers instead of a dot. */
@@ -59,7 +67,9 @@
 .nav-item.processing .glyph {
   color: var(--accent);
   opacity: 1;
-  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--accent) 45%, transparent));
+  filter: drop-shadow(
+    0 0 5px color-mix(in oklab, var(--accent) 45%, transparent)
+  );
 }
 @keyframes shimmer {
   to {
@@ -81,16 +91,21 @@
   border-radius: var(--radius);
   color: var(--text-dim);
   text-align: left;
-  transition: background var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
 }
 .nav-item:hover {
   background: var(--surface);
   color: var(--text);
 }
 .nav-item[aria-current="true"] {
-  background: linear-gradient(160deg, var(--accent-quiet), transparent 80%), var(--surface);
+  background:
+    linear-gradient(160deg, var(--accent-quiet), transparent 80%),
+    var(--surface);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent),
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent),
     var(--glass-highlight);
 }
 .nav-item .glyph {
@@ -214,7 +229,8 @@
 }
 .card.notice {
   border-color: color-mix(in oklab, var(--warn) 32%, var(--glass-border));
-  background: linear-gradient(
+  background:
+    linear-gradient(
       160deg,
       color-mix(in oklab, var(--warn) 9%, transparent),
       transparent 60%
@@ -274,9 +290,13 @@
     color-mix(in oklab, var(--accent) 30%, transparent) 45%,
     transparent 66%
   );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   mask-composite: exclude;
   opacity: calc(var(--glow, 0) * 0.9);
   transition: opacity 200ms var(--ease);
@@ -340,13 +360,19 @@
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   box-shadow: var(--glass-highlight);
-  transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease),
+  transition:
+    border-color var(--duration) var(--ease),
+    background var(--duration) var(--ease),
     box-shadow var(--duration) var(--ease);
 }
 .dropzone.over {
   border-color: var(--accent);
-  background: linear-gradient(160deg, var(--accent-quiet), transparent 70%), var(--glass-bg);
-  box-shadow: var(--glass-highlight), 0 0 0 1px var(--accent-quiet),
+  background:
+    linear-gradient(160deg, var(--accent-quiet), transparent 70%),
+    var(--glass-bg);
+  box-shadow:
+    var(--glass-highlight),
+    0 0 0 1px var(--accent-quiet),
     0 18px 40px -20px oklch(70% 0.15 var(--accent-h) / 0.4);
   color: var(--text);
 }
@@ -417,7 +443,9 @@
   color: var(--text);
   font-weight: 550;
   box-shadow: var(--glass-highlight);
-  transition: transform var(--duration-fast) var(--ease), border-color var(--duration-fast),
+  transition:
+    transform var(--duration-fast) var(--ease),
+    border-color var(--duration-fast),
     background var(--duration-fast);
 }
 .btn:hover {
@@ -469,7 +497,9 @@
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--glass-highlight);
-  transition: border-color var(--duration-fast), transform var(--duration-fast) var(--ease),
+  transition:
+    border-color var(--duration-fast),
+    transform var(--duration-fast) var(--ease),
     box-shadow var(--duration-fast);
 }
 .preset:hover {
@@ -478,8 +508,11 @@
 }
 .preset[aria-pressed="true"] {
   border-color: color-mix(in oklab, var(--accent) 55%, transparent);
-  background: linear-gradient(160deg, var(--accent-quiet), transparent 70%), var(--surface);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent),
+  background:
+    linear-gradient(160deg, var(--accent-quiet), transparent 70%),
+    var(--surface);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent),
     0 0 24px -14px var(--accent);
 }
 .preset .p-name {
@@ -582,10 +615,14 @@
   width: 2px;
   height: 7px;
   border-radius: 999px;
-  transform: translate(-50%, -50%) scale(calc(1 + var(--mag) * 0.4), calc(1 + var(--mag) * 1.5));
+  transform: translate(-50%, -50%)
+    scale(calc(1 + var(--mag) * 0.4), calc(1 + var(--mag) * 1.5));
   background: oklch(100% 0 0 / calc(0.05 + var(--mag) * 0.85));
-  box-shadow: 0 0 calc(var(--mag) * 6px) color-mix(in oklab, var(--accent) 70%, transparent);
-  transition: transform 120ms var(--ease), background 120ms var(--ease),
+  box-shadow: 0 0 calc(var(--mag) * 6px)
+    color-mix(in oklab, var(--accent) 70%, transparent);
+  transition:
+    transform 120ms var(--ease),
+    background 120ms var(--ease),
     box-shadow 120ms var(--ease);
 }
 .vmaf-slider .range-thumb {
@@ -597,23 +634,29 @@
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, white, var(--accent) 75%);
   border: 1px solid color-mix(in oklab, var(--accent) 55%, white);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent),
-    0 0 10px -2px var(--accent), inset 0 1px 0 oklch(100% 0 0 / 0.5);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent),
+    0 0 10px -2px var(--accent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.5);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 /* Springy ease-out with a gentle overshoot on both the fill and the knob. */
 .vmaf-slider .range-fill,
 .vmaf-slider .range-thumb {
-  transition: width 260ms cubic-bezier(0.34, 1.4, 0.5, 1),
-    left 260ms cubic-bezier(0.34, 1.4, 0.5, 1), transform var(--duration-fast) var(--ease),
+  transition:
+    width 260ms cubic-bezier(0.34, 1.4, 0.5, 1),
+    left 260ms cubic-bezier(0.34, 1.4, 0.5, 1),
+    transform var(--duration-fast) var(--ease),
     box-shadow var(--duration-fast);
 }
 .vmaf-slider .range:hover .range-thumb {
   transform: translate(-50%, -50%) scale(1.12);
 }
 .vmaf-slider .range input:focus-visible ~ .range-thumb {
-  box-shadow: 0 0 0 3px var(--accent-quiet), 0 0 12px -2px var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-quiet),
+    0 0 12px -2px var(--accent);
 }
 .vmaf-slider .range input[type="range"] {
   position: absolute;
@@ -656,12 +699,15 @@
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  transition: background var(--duration-fast), color var(--duration-fast);
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
 }
 .seg button[aria-pressed="true"] {
   background: linear-gradient(180deg, var(--accent-quiet), transparent);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--accent) 30%, transparent);
 }
 
 /* ---- Encoder panel ---- */
@@ -724,7 +770,9 @@
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--glass-highlight);
-  transition: border-color var(--duration-fast), transform var(--duration-fast) var(--ease);
+  transition:
+    border-color var(--duration-fast),
+    transform var(--duration-fast) var(--ease);
 }
 .matrix-cell:hover {
   transform: translateY(-1px);
@@ -732,8 +780,11 @@
 }
 .matrix-cell.active {
   border-color: color-mix(in oklab, var(--accent) 55%, transparent);
-  background: linear-gradient(160deg, var(--accent-quiet), transparent 70%), var(--surface);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent);
+  background:
+    linear-gradient(160deg, var(--accent-quiet), transparent 70%),
+    var(--surface);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--accent) 35%, transparent);
 }
 .mc-codec {
   font-weight: 650;
@@ -903,7 +954,9 @@
     var(--bar-c) 100%
   );
   background-size: 200% 100%;
-  box-shadow: 0 0 6px -2px var(--bar-c), inset 0 1px 0 oklch(100% 0 0 / 0.4);
+  box-shadow:
+    0 0 6px -2px var(--bar-c),
+    inset 0 1px 0 oklch(100% 0 0 / 0.4);
   transition: width 200ms linear;
   /* Same 1.8s period as the glow. Linear + a start offset so the highlight
      crosses the tip (background-position 0) at exactly 32% of the cycle — the
@@ -1006,11 +1059,17 @@
   font-size: var(--text-2xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(180deg, oklch(92% 0.08 var(--accent-h)), var(--accent));
+  background: linear-gradient(
+    180deg,
+    oklch(92% 0.08 var(--accent-h)),
+    var(--accent)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 2px 16px color-mix(in oklab, var(--accent) 35%, transparent));
+  filter: drop-shadow(
+    0 2px 16px color-mix(in oklab, var(--accent) 35%, transparent)
+  );
 }
 .stat-row {
   display: flex;
@@ -1204,7 +1263,9 @@
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--menu-border);
   border-radius: var(--radius);
-  box-shadow: var(--glass-highlight), 0 20px 44px -18px oklch(0% 0 0 / 0.8);
+  box-shadow:
+    var(--glass-highlight),
+    0 20px 44px -18px oklch(0% 0 0 / 0.8);
   z-index: 100;
   animation: sel-in var(--duration-fast) var(--ease);
 }
@@ -1229,7 +1290,8 @@
 .sel-option.selected {
   background: linear-gradient(180deg, var(--accent-quiet), transparent);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--accent) 25%, transparent);
 }
 
 .switch {
@@ -1283,7 +1345,9 @@
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--glass-highlight), 0 16px 40px -12px oklch(0% 0 0 / 0.7);
+  box-shadow:
+    var(--glass-highlight),
+    0 16px 40px -12px oklch(0% 0 0 / 0.7);
 }
 .actionbar.clickable {
   cursor: pointer;
@@ -1581,10 +1645,14 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
   padding: var(--space-4);
-  background: linear-gradient(160deg, var(--accent-quiet), transparent 45%), var(--glass-bg);
+  background:
+    linear-gradient(160deg, var(--accent-quiet), transparent 45%),
+    var(--glass-bg);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--glass-highlight), 0 0 26px -16px var(--accent);
+  box-shadow:
+    var(--glass-highlight),
+    0 0 26px -16px var(--accent);
   margin-bottom: var(--space-3);
 }
 .live-top {
@@ -1678,8 +1746,14 @@
 
 /* ---- Expandable status cards (log + history) ---- */
 .ecard {
-  border: 1px solid color-mix(in oklab, var(--tone, var(--glass-border)) 26%, var(--glass-border));
-  background: linear-gradient(
+  border: 1px solid
+    color-mix(
+      in oklab,
+      var(--tone, var(--glass-border)) 26%,
+      var(--glass-border)
+    );
+  background:
+    linear-gradient(
       160deg,
       color-mix(in oklab, var(--tone, transparent) 12%, transparent),
       transparent 55%
@@ -1691,12 +1765,20 @@
   margin-bottom: var(--space-3);
   overflow: hidden;
   box-shadow: var(--glass-highlight);
-  transition: border-color var(--duration-fast) var(--ease), box-shadow var(--duration-fast);
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast);
 }
 .ecard:hover {
-  border-color: color-mix(in oklab, var(--tone, var(--border-strong)) 50%, var(--glass-border));
-  box-shadow: var(--glass-highlight),
-    0 0 22px -12px color-mix(in oklab, var(--tone, transparent) 80%, transparent);
+  border-color: color-mix(
+    in oklab,
+    var(--tone, var(--border-strong)) 50%,
+    var(--glass-border)
+  );
+  box-shadow:
+    var(--glass-highlight),
+    0 0 22px -12px
+      color-mix(in oklab, var(--tone, transparent) 80%, transparent);
 }
 .ecard-head {
   display: flex;
@@ -1779,7 +1861,8 @@
 }
 .ecard-body {
   padding: var(--space-4);
-  border-top: 1px solid color-mix(in oklab, var(--tone, var(--border)) 22%, var(--border));
+  border-top: 1px solid
+    color-mix(in oklab, var(--tone, var(--border)) 22%, var(--border));
   font-size: var(--text-sm);
   color: var(--text-dim);
 }
@@ -1849,7 +1932,9 @@
   padding: 4px 10px;
   font-size: var(--text-xs);
   box-shadow: var(--glass-highlight);
-  transition: border-color var(--duration-fast), color var(--duration-fast),
+  transition:
+    border-color var(--duration-fast),
+    color var(--duration-fast),
     background var(--duration-fast);
 }
 .mini-btn svg {
@@ -1862,6 +1947,40 @@
 .mini-btn.danger:hover {
   border-color: var(--bad);
   color: var(--bad);
+}
+
+/* Unattended-run badge on the Live tab. */
+.run-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: var(--space-2) 0 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  background: var(--accent-quiet);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--accent) 25%, transparent);
+}
+.run-source-badge svg {
+  filter: drop-shadow(
+    0 0 3px color-mix(in oklab, var(--accent) 45%, transparent)
+  );
+}
+
+/* Watch toggle: quiet like any mini-btn when off, glowing accent when watching. */
+.mini-btn.watch-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-quiet);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 35%, transparent);
+}
+.mini-btn.watch-toggle.on svg {
+  opacity: 1;
+  filter: drop-shadow(
+    0 0 4px color-mix(in oklab, var(--accent) 55%, transparent)
+  );
 }
 
 /* ---- Filter / search bar ---- */
@@ -1897,7 +2016,9 @@
   border-radius: 999px;
   padding: 3px 12px;
   font-size: var(--text-xs);
-  transition: border-color var(--duration-fast), background var(--duration-fast);
+  transition:
+    border-color var(--duration-fast),
+    background var(--duration-fast);
 }
 .chip[aria-pressed="true"] {
   border-color: color-mix(in oklab, var(--accent) 50%, transparent);
@@ -1954,7 +2075,9 @@
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--glass-highlight), 0 16px 40px -12px oklch(0% 0 0 / 0.7);
+  box-shadow:
+    var(--glass-highlight),
+    0 16px 40px -12px oklch(0% 0 0 / 0.7);
   max-height: 46vh;
   overflow-y: auto;
   transform-origin: bottom center;
@@ -2014,7 +2137,8 @@
   font: inherit;
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: color var(--duration-fast) var(--ease),
+  transition:
+    color var(--duration-fast) var(--ease),
     border-color var(--duration-fast) var(--ease);
 }
 .ab-toggle:hover {

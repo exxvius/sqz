@@ -25,7 +25,9 @@ export function initCursorFx(): () => void {
   const apply = () => {
     frame = 0;
 
-    const cards = Array.from(document.querySelectorAll<HTMLElement>(CARD_SELECTOR));
+    const cards = Array.from(
+      document.querySelectorAll<HTMLElement>(CARD_SELECTOR),
+    );
     // Read phase: all layout reads first.
     const rects = cards.map((c) => c.getBoundingClientRect());
     // Write phase: no reads interleaved.

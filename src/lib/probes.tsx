@@ -64,11 +64,21 @@ export function ProbeProvider({ children }: { children: ReactNode }) {
   }, [redetect, recheckEnv]);
 
   const value = useMemo<ProbeValue>(
-    () => ({ detection, detecting, detectFailed, redetect, env, envLoading, recheckEnv }),
+    () => ({
+      detection,
+      detecting,
+      detectFailed,
+      redetect,
+      env,
+      envLoading,
+      recheckEnv,
+    }),
     [detection, detecting, detectFailed, redetect, env, envLoading, recheckEnv],
   );
 
-  return <ProbeContext.Provider value={value}>{children}</ProbeContext.Provider>;
+  return (
+    <ProbeContext.Provider value={value}>{children}</ProbeContext.Provider>
+  );
 }
 
 export function useProbes(): ProbeValue {

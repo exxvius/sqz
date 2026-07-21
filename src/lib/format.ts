@@ -9,7 +9,9 @@ export function humanBytes(n: number | null | undefined): string {
     size /= 1024;
     u += 1;
   }
-  return u === 0 ? `${Math.round(size)} ${units[u]}` : `${size.toFixed(1)} ${units[u]}`;
+  return u === 0
+    ? `${Math.round(size)} ${units[u]}`
+    : `${size.toFixed(1)} ${units[u]}`;
 }
 
 export function pct(frac: number): string {
@@ -29,7 +31,11 @@ export function fileName(path: string): string {
  * non-encoded row keeps its source path. Legacy rows encoded before the extension
  * was recorded fall back to `.mkv` (the historical default).
  */
-export function currentPath(path: string, encoded: boolean, outExt?: string | null): string {
+export function currentPath(
+  path: string,
+  encoded: boolean,
+  outExt?: string | null,
+): string {
   if (!encoded) return path;
   return path.replace(/\.[^./\\]+$/, `.${outExt || "mkv"}`);
 }
@@ -39,7 +45,8 @@ export function fmtDuration(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  if (h > 0)
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 

@@ -11,16 +11,33 @@ import {
   PlayIcon,
   RemoveIcon,
   SearchIcon,
+  WatchIcon,
 } from "../components/icons";
 import { api, openFile, revealFile } from "../lib/api";
 import { defaultConfig } from "../lib/config";
-import { currentPath, fileName, humanBytes, pct, relativeTime } from "../lib/format";
+import {
+  currentPath,
+  fileName,
+  humanBytes,
+  pct,
+  relativeTime,
+} from "../lib/format";
 import { healthMeta, statusMeta } from "../lib/status";
 import { useLock } from "../lib/lock";
 import { useStore } from "../lib/store";
-import type { HealthState, Library, RunConfig, SavedLibrary } from "../lib/types";
+import { defaultWatch } from "../lib/types";
+import type {
+  HealthState,
+  Library,
+  RunConfig,
+  SavedLibrary,
+} from "../lib/types";
 
-const CODEC_LABEL: Record<string, string> = { av1: "AV1", hevc: "HEVC", h264: "H.264" };
+const CODEC_LABEL: Record<string, string> = {
+  av1: "AV1",
+  hevc: "HEVC",
+  h264: "H.264",
+};
 const QUALITY_LABEL: Record<string, string> = {
   "max-savings": "Max savings",
   balanced: "Balanced",
@@ -31,7 +48,11 @@ const QUALITY_LABEL: Record<string, string> = {
 /** One-line "AV1 · Balanced · ≤1080p · MKV" summary of a library's profile. */
 function profileSummary(p: RunConfig): string {
   const parts = [CODEC_LABEL[p.codec] ?? p.codec];
-  parts.push(p.vmaf_target != null ? `VMAF ${p.vmaf_target}` : QUALITY_LABEL[p.quality] ?? p.quality);
+  parts.push(
+    p.vmaf_target != null
+      ? `VMAF ${p.vmaf_target}`
+      : (QUALITY_LABEL[p.quality] ?? p.quality),
+  );
   parts.push(p.max_height > 4320 ? "no cap" : `≤${p.max_height}p`);
   parts.push(p.container.toUpperCase());
   // Only surface a Deep gate — Off/Structural are the quiet defaults.
@@ -144,12 +165,23 @@ export function LibraryView({ goDashboard }: Props) {
     name: "",
     roots: [],
     profile: { ...defaultConfig(), inputs: [] },
+    watch: defaultWatch(),
     created_at: 0,
     updated_at: 0,
   });
 
   const saveLibrary = async (lib: SavedLibrary) => {
     await api.saveLibrary(lib);
+    refreshLibraries();
+  };
+
+  // One-click Watch toggle: flip unattended watching for this library, keeping
+  // its schedule (edited in the library editor). Persists immediately.
+  const toggleWatch = async (lib: SavedLibrary) => {
+    await api.saveLibrary({
+      ...lib,
+      watch: { ...lib.watch, enabled: !lib.watch.enabled },
+    });
     refreshLibraries();
   };
 
@@ -173,11 +205,14 @@ export function LibraryView({ goDashboard }: Props) {
     });
 
   const scanFrac =
-    scanProgress && scanProgress.total > 0 ? scanProgress.scanned / scanProgress.total : 0;
+    scanProgress && scanProgress.total > 0
+      ? scanProgress.scanned / scanProgress.total
+      : 0;
 
   const counts = library?.counts ?? {};
   const allRows = (library?.rows ?? []).filter((r) => {
-    if (filters.size > 0 && (r.health === null || !filters.has(r.health))) return false;
+    if (filters.size > 0 && (r.health === null || !filters.has(r.health)))
+      return false;
     if (search) {
       // Match the file that exists now (a done source resolves to its .mkv), so
       // searching for the real on-disk name finds the row the card displays.
@@ -221,28 +256,37 @@ export function LibraryView({ goDashboard }: Props) {
       <div className="view-head">
         <h2>Library</h2>
         <p>
-          Save your media folders as named libraries, each with its own encode profile (movies vs.
-          phone clips vs. VR), and re-run or health-check them in one click. Scanning flags corrupt
-          or unreadable files without re-encoding; scanned files show up below.
+          Save your media folders as named libraries, each with its own encode
+          profile (movies vs. phone clips vs. VR), and re-run or health-check
+          them in one click. Scanning flags corrupt or unreadable files without
+          re-encoding; scanned files show up below.
         </p>
       </div>
 
       <div className="card">
         <div className="meter">
-          <span className="num">{(library?.rows.length ?? 0).toLocaleString()}</span>
+          <span className="num">
+            {(library?.rows.length ?? 0).toLocaleString()}
+          </span>
           <span className="muted">files scanned</span>
         </div>
         <div className="stat-row">
           <div className="stat">
-            <span className="v">{(counts["healthy"] ?? 0).toLocaleString()}</span>
+            <span className="v">
+              {(counts["healthy"] ?? 0).toLocaleString()}
+            </span>
             <span className="k">Healthy</span>
           </div>
           <div className="stat">
-            <span className="v">{(counts["corrupt"] ?? 0).toLocaleString()}</span>
+            <span className="v">
+              {(counts["corrupt"] ?? 0).toLocaleString()}
+            </span>
             <span className="k">Corrupt</span>
           </div>
           <div className="stat">
-            <span className="v">{(counts["unreadable"] ?? 0).toLocaleString()}</span>
+            <span className="v">
+              {(counts["unreadable"] ?? 0).toLocaleString()}
+            </span>
             <span className="k">Unreadable</span>
           </div>
         </div>
@@ -251,17 +295,23 @@ export function LibraryView({ goDashboard }: Props) {
       {!locked && (
         <div className="card card-flat card-glow">
           <div className="history-toolbar">
-            <h3 style={{ margin: 0, fontSize: "var(--text-lg)" }}>Saved libraries</h3>
+            <h3 style={{ margin: 0, fontSize: "var(--text-lg)" }}>
+              Saved libraries
+            </h3>
             <div className="grow" />
-            <button className="mini-btn" onClick={() => setEditing(newLibrary())}>
+            <button
+              className="mini-btn"
+              onClick={() => setEditing(newLibrary())}
+            >
               <NewLibraryIcon /> New library
             </button>
           </div>
 
           {libraries.length === 0 ? (
             <p className="muted" style={{ margin: "var(--space-3) 0 0" }}>
-              No saved libraries yet. Create one with its own encode target (movies vs. phone clips
-              vs. VR), then run or health-check it in one click with “New library”.
+              No saved libraries yet. Create one with its own encode target
+              (movies vs. phone clips vs. VR), then run or health-check it in
+              one click with “New library”.
             </p>
           ) : (
             <div className="lib-list" style={{ marginTop: "var(--space-3)" }}>
@@ -272,7 +322,8 @@ export function LibraryView({ goDashboard }: Props) {
                     <div className="lib-row-main">
                       <span className="lib-name">{lib.name}</span>
                       <span className="muted lib-meta">
-                        {lib.roots.length} folder{lib.roots.length === 1 ? "" : "s"} ·{" "}
+                        {lib.roots.length} folder
+                        {lib.roots.length === 1 ? "" : "s"} ·{" "}
                         {profileSummary(lib.profile)}
                       </span>
                     </div>
@@ -314,9 +365,27 @@ export function LibraryView({ goDashboard }: Props) {
                       ) : (
                         <>
                           <button
+                            className={`mini-btn watch-toggle${lib.watch.enabled ? " on" : ""}`}
+                            onClick={() => toggleWatch(lib)}
+                            disabled={lib.roots.length === 0}
+                            aria-pressed={lib.watch.enabled}
+                            title={
+                              lib.watch.enabled
+                                ? "Watching — unattended runs on schedule. Click to stop."
+                                : "Watch this library — run unattended on a schedule (set in Edit)."
+                            }
+                            aria-label="Watch this library"
+                          >
+                            <WatchIcon />
+                          </button>
+                          <button
                             className="mini-btn"
                             onClick={() => runLibrary(lib)}
-                            disabled={store.running || scanning || lib.roots.length === 0}
+                            disabled={
+                              store.running ||
+                              scanning ||
+                              lib.roots.length === 0
+                            }
                             title="Encode this library with its profile"
                             aria-label="Run"
                           >
@@ -354,16 +423,23 @@ export function LibraryView({ goDashboard }: Props) {
                     {isScanningThis && (
                       <div className="lib-row-scan">
                         <div className="scan-progress-head">
-                          <span>{scanDeep ? "Deep scanning" : "Scanning"}…</span>
+                          <span>
+                            {scanDeep ? "Deep scanning" : "Scanning"}…
+                          </span>
                           <span className="muted">
                             {scanProgress
                               ? `${scanProgress.scanned} / ${scanProgress.total}${
-                                  scanProgress.total > 0 ? ` · ${pct(scanFrac)}` : ""
+                                  scanProgress.total > 0
+                                    ? ` · ${pct(scanFrac)}`
+                                    : ""
                                 }`
                               : "preparing…"}
                           </span>
                         </div>
-                        <div className="bar" style={{ ["--p" as string]: scanFrac }}>
+                        <div
+                          className="bar"
+                          style={{ ["--p" as string]: scanFrac }}
+                        >
                           <span />
                         </div>
                         {scanProgress && (
@@ -396,7 +472,9 @@ export function LibraryView({ goDashboard }: Props) {
         <div className="filterbar">
           <input
             className="search"
-            placeholder={locked ? "Search disabled while locked" : "Search by path…"}
+            placeholder={
+              locked ? "Search disabled while locked" : "Search by path…"
+            }
             value={locked ? "" : search}
             disabled={locked}
             onChange={(e) => setSearch(e.target.value)}
@@ -486,7 +564,11 @@ export function LibraryView({ goDashboard }: Props) {
                 name={maskName(fileName(filePath))}
                 fullPath={locked ? undefined : filePath}
                 tag={h.label}
-                meta={<span className="ecard-meta">{relativeTime(r.health_checked_at)}</span>}
+                meta={
+                  <span className="ecard-meta">
+                    {relativeTime(r.health_checked_at)}
+                  </span>
+                }
                 actions={actions}
               >
                 <dl className="kv-grid">
@@ -505,7 +587,9 @@ export function LibraryView({ goDashboard }: Props) {
                       <dt>codec</dt>
                       <dd>
                         {r.cur_codec ?? r.src_codec}
-                        {(r.cur_height ?? r.height) ? ` · ${r.cur_height ?? r.height}p` : ""}
+                        {(r.cur_height ?? r.height)
+                          ? ` · ${r.cur_height ?? r.height}p`
+                          : ""}
                       </dd>
                     </>
                   )}

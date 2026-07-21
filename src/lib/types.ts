@@ -2,12 +2,10 @@
 
 export type Codec = "av1" | "hevc" | "h264";
 export type QualityPreset =
-  | "max-savings"
-  | "balanced"
-  | "high-quality"
-  | "visually-lossless";
+  "max-savings" | "balanced" | "high-quality" | "visually-lossless";
 export type OnSuccess = "recycle" | "holding" | "delete" | "nowhere";
-export type EncoderFamily = "nvenc" | "amf" | "qsv" | "videotoolbox" | "software";
+export type EncoderFamily =
+  "nvenc" | "amf" | "qsv" | "videotoolbox" | "software";
 export type Container = "mkv" | "mp4";
 export type AudioMode = "copy" | "opus" | "aac";
 export type VerifyDepth = "fast" | "thorough" | "checksummed";
@@ -18,13 +16,7 @@ export type HealthGate = "off" | "structural" | "deep";
 export type ScaleFilter = "lanczos" | "bicubic" | "bilinear" | "area";
 export type BitDepth = "source" | "8" | "10";
 export type EncoderSpeed =
-  | "best"
-  | "better"
-  | "good"
-  | "balanced"
-  | "fast"
-  | "faster"
-  | "fastest";
+  "best" | "better" | "good" | "balanced" | "fast" | "faster" | "fastest";
 export type Order =
   | "smart"
   | "largest-first"
@@ -200,6 +192,32 @@ export interface Library {
   rows: LibraryRow[];
 }
 
+/** When a watched library fires an unattended run. */
+export type Trigger =
+  | { kind: "interval"; every_mins: number }
+  | { kind: "daily"; hour: number; minute: number };
+
+/** Per-library unattended-run configuration. */
+export interface WatchConfig {
+  /** This library participates in unattended runs. */
+  enabled: boolean;
+  trigger: Trigger;
+  /** Only start (and stay running) while the machine is input-idle. */
+  idle_only: boolean;
+}
+
+/** Smallest interval (minutes) an interval trigger may fire on (mirrors Rust). */
+export const MIN_INTERVAL_MINS = 15;
+
+/** The default watch config for a newly-watched library (mirrors Rust defaults). */
+export function defaultWatch(): WatchConfig {
+  return {
+    enabled: false,
+    trigger: { kind: "daily", hour: 3, minute: 0 },
+    idle_only: true,
+  };
+}
+
 /**
  * A named folder set with its own embedded encode profile. The re-runnable unit
  * 1.2.0's unattended mode binds to. `profile` is a `RunConfig` with `inputs`
@@ -210,8 +228,33 @@ export interface SavedLibrary {
   name: string;
   roots: string[];
   profile: RunConfig;
+  /** Unattended-run schedule. Defaults to disabled for pre-1.2.0 libraries. */
+  watch: WatchConfig;
   created_at: number;
   updated_at: number;
+}
+
+/** One watched library's automation status (Dashboard panel). */
+export interface AutomationEntry {
+  library_id: string;
+  name: string;
+  /** Unix seconds of the next scheduled fire (a due schedule reads as "now"). */
+  next_run_at: number | null;
+  /** Unix seconds of the last auto-run, if it has ever fired. */
+  last_auto_run_at: number | null;
+}
+
+/** Global automation status: the master switch + every watched library. */
+export interface AutomationStatus {
+  enabled: boolean;
+  entries: AutomationEntry[];
+}
+
+/** Emitted when a run launches, so the UI can label a manual vs. unattended run. */
+export interface RunSourceInfo {
+  source: "manual" | "unattended";
+  library_id: string | null;
+  library_name: string | null;
 }
 
 /** Tally returned when a health scan finishes. */

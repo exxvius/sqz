@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AutomationStatus,
   Detection,
   EnvInfo,
   FfStatus,
@@ -20,18 +21,25 @@ import type {
 export const api = {
   ffmpegStatus: () => invoke<FfStatus>("ffmpeg_status"),
   detectEncoders: () => invoke<Detection>("detect_encoders"),
-  scanInputs: (inputs: string[]) => invoke<ScanResult>("scan_inputs", { inputs }),
+  scanInputs: (inputs: string[]) =>
+    invoke<ScanResult>("scan_inputs", { inputs }),
   projectReclaim: (config: RunConfig) =>
     invoke<ReclaimProjection>("project_reclaim", { config }),
   scanHealth: (config: RunConfig, deep: boolean) =>
     invoke<HealthSummary>("scan_health", { config, deep }),
   cancelScan: () => invoke<void>("cancel_scan"),
-  getLibrary: (filter: HistoryFilter = {}) => invoke<Library>("get_library", { filter }),
+  getLibrary: (filter: HistoryFilter = {}) =>
+    invoke<Library>("get_library", { filter }),
   deleteLibraryPaths: (paths: string[]) =>
     invoke<number>("delete_library_paths", { paths }),
   listLibraries: () => invoke<SavedLibrary[]>("list_libraries"),
-  saveLibrary: (lib: SavedLibrary) => invoke<SavedLibrary>("save_library", { lib }),
+  saveLibrary: (lib: SavedLibrary) =>
+    invoke<SavedLibrary>("save_library", { lib }),
   deleteLibrary: (id: string) => invoke<void>("delete_library", { id }),
+  getAutomation: () => invoke<AutomationStatus>("get_automation"),
+  setAutomationEnabled: (enabled: boolean) =>
+    invoke<void>("set_automation_enabled", { enabled }),
+  runLibraryNow: (id: string) => invoke<void>("run_library_now", { id }),
   startRun: (config: RunConfig) => invoke<void>("start_run", { config }),
   pauseRun: () => invoke<void>("pause_run"),
   resumeRun: () => invoke<void>("resume_run"),
@@ -40,8 +48,10 @@ export const api = {
   retryFile: (path: string) => invoke<void>("retry_file", { path }),
   forceFile: (path: string) => invoke<void>("force_file", { path }),
   isRunning: () => invoke<boolean>("is_running"),
-  getHistory: (filter: HistoryFilter = {}) => invoke<History>("get_history", { filter }),
-  deleteHistoryItem: (path: string) => invoke<void>("delete_history_item", { path }),
+  getHistory: (filter: HistoryFilter = {}) =>
+    invoke<History>("get_history", { filter }),
+  deleteHistoryItem: (path: string) =>
+    invoke<void>("delete_history_item", { path }),
   deleteHistoryMatching: (filter: HistoryFilter) =>
     invoke<number>("delete_history_matching", { filter }),
   clearHistory: () => invoke<void>("clear_history"),
@@ -52,8 +62,11 @@ export const api = {
   exportSettings: (dest: string) => invoke<void>("export_settings", { dest }),
   importSettings: (src: string) =>
     invoke<Record<string, unknown>>("import_settings", { src }),
-  exportHistory: (dest: string, format: "csv" | "json", filter: HistoryFilter = {}) =>
-    invoke<number>("export_history", { dest, format, filter }),
+  exportHistory: (
+    dest: string,
+    format: "csv" | "json",
+    filter: HistoryFilter = {},
+  ) => invoke<number>("export_history", { dest, format, filter }),
   environment: () => invoke<EnvInfo>("environment"),
   quitApp: () => invoke<void>("quit_app"),
   lockStatus: () => invoke<LockStatus>("lock_status"),
@@ -75,9 +88,11 @@ export async function pickBinary(title: string): Promise<string | null> {
 }
 
 /** Open a file with the OS default application ("play"). */
-export const openFile = (path: string) => invoke<void>("open_path", { path }).catch(() => {});
+export const openFile = (path: string) =>
+  invoke<void>("open_path", { path }).catch(() => {});
 /** Reveal a file in its containing folder (file manager). */
-export const revealFile = (path: string) => invoke<void>("reveal_path", { path }).catch(() => {});
+export const revealFile = (path: string) =>
+  invoke<void>("reveal_path", { path }).catch(() => {});
 
 /** Native picker for files and/or folders to add to the queue. */
 export async function pickInputs(directory: boolean): Promise<string[]> {

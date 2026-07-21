@@ -25,8 +25,8 @@ use crate::core::probe::{probe, probe_many};
 use crate::core::schedule::{self, AutomationSettings};
 use crate::core::util::command_no_window;
 use crate::events::{
-    RunSourceInfo, TauriReporter, EV_HEALTH_DONE, EV_HEALTH_PROGRESS, EV_PROJECTION, EV_RUN_DONE,
-    EV_RUN_SOURCE,
+    RunPaused, RunSourceInfo, TauriReporter, EV_HEALTH_DONE, EV_HEALTH_PROGRESS, EV_PROJECTION,
+    EV_RUN_DONE, EV_RUN_PAUSED, EV_RUN_SOURCE,
 };
 use crate::run::{run, ActiveMap, RunSummary};
 
@@ -1137,7 +1137,11 @@ fn supervisor_tick(app: &AppHandle) {
         {
             let pause = schedule::should_pause(&lib, system_idle);
             if let Some(rc) = &*state.run.lock().unwrap() {
-                rc.paused.store(pause, Ordering::Relaxed);
+                // Only write/emit on a change so the UI toast fires once, not every tick.
+                if rc.paused.load(Ordering::Relaxed) != pause {
+                    rc.paused.store(pause, Ordering::Relaxed);
+                    let _ = app.emit(EV_RUN_PAUSED, RunPaused { paused: pause });
+                }
             }
         }
         return;

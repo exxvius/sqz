@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
+import { AutomationPanel } from "../components/AutomationPanel";
 import { EventLog } from "../components/EventLog";
 import { LiveFiles } from "../components/LiveFiles";
-import { ClearIcon } from "../components/icons";
+import { ClearIcon, WatchIcon } from "../components/icons";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
 import { useLock } from "../lib/lock";
@@ -10,12 +11,23 @@ export function DashboardView() {
   const store = useStore();
   const { locked } = useLock();
   const active = Object.values(store.active);
-  const { session, summary } = store;
+  const { session, summary, runSource } = store;
+  const unattended =
+    store.running && runSource?.source === "unattended"
+      ? runSource.library_name
+      : null;
 
   return (
     <div className="view">
       <div className="view-head">
         <h2>Live progress</h2>
+        {unattended && (
+          <div className="run-source-badge">
+            <WatchIcon size={14} /> Unattended run of{" "}
+            <strong>{unattended}</strong>
+            {store.paused && " · paused — you're active"}
+          </div>
+        )}
         <p>
           {store.running
             ? store.paused
@@ -26,6 +38,8 @@ export function DashboardView() {
               : "Idle. Start a run from the Home tab."}
         </p>
       </div>
+
+      <AutomationPanel />
 
       <div className="card">
         {store.queueTotal > 0 && (
@@ -72,7 +86,8 @@ export function DashboardView() {
           {store.running ? (
             locked ? (
               <span className="muted">
-                Run controls are locked. Encoding continues; unlock to pause or stop.
+                Run controls are locked. Encoding continues; unlock to pause or
+                stop.
               </span>
             ) : (
               <>
@@ -88,7 +103,9 @@ export function DashboardView() {
                 <button className="btn danger" onClick={store.cancel}>
                   Stop (resumable)
                 </button>
-                <span className="muted">Progress is saved — stopping is always safe.</span>
+                <span className="muted">
+                  Progress is saved — stopping is always safe.
+                </span>
               </>
             )
           ) : (
@@ -99,7 +116,11 @@ export function DashboardView() {
 
       <div className="card card-flat">
         <div className="card-title">Active encodes</div>
-        <LiveFiles active={active} minSavings={store.minSavings} onAbort={store.abortFile} />
+        <LiveFiles
+          active={active}
+          minSavings={store.minSavings}
+          onAbort={store.abortFile}
+        />
       </div>
 
       <div className="card card-flat">
@@ -111,7 +132,11 @@ export function DashboardView() {
             </button>
           )}
         </div>
-        <EventLog log={store.log} onRetry={store.retryFile} onForce={store.forceFile} />
+        <EventLog
+          log={store.log}
+          onRetry={store.retryFile}
+          onForce={store.forceFile}
+        />
       </div>
     </div>
   );

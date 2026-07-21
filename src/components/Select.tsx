@@ -26,14 +26,21 @@ interface Props {
  * portaled to `document.body` with fixed positioning so glass cards (each their
  * own stacking context) can't paint over it.
  */
-export function Select({ value, options, onChange, ariaLabel, disabled }: Props) {
+export function Select({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  disabled,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
 
   useLayoutEffect(() => {
-    if (open && triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+    if (open && triggerRef.current)
+      setRect(triggerRef.current.getBoundingClientRect());
   }, [open]);
 
   useEffect(() => {
@@ -41,7 +48,8 @@ export function Select({ value, options, onChange, ariaLabel, disabled }: Props)
     const close = () => setOpen(false);
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t))
+        return;
       close();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -97,7 +105,12 @@ export function Select({ value, options, onChange, ariaLabel, disabled }: Props)
       {open &&
         rect &&
         createPortal(
-          <ul ref={menuRef} className="sel-menu" role="listbox" style={menuStyle}>
+          <ul
+            ref={menuRef}
+            className="sel-menu"
+            role="listbox"
+            style={menuStyle}
+          >
             {options.map((o) => (
               <li
                 key={o.value}

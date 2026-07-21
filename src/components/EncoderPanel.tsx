@@ -23,10 +23,20 @@ const CODEC_LABEL: Record<Codec, string> = {
   h264: "H.264",
 };
 
-export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Props) {
+export function EncoderPanel({
+  codec,
+  encoderOverride,
+  onOverride,
+  onCodec,
+}: Props) {
   // Detection is probed once at app root and cached, so it survives tab switches
   // instead of re-running a real test-encode every time Home is opened.
-  const { detection, detecting: loading, detectFailed: failed, redetect: detect } = useProbes();
+  const {
+    detection,
+    detecting: loading,
+    detectFailed: failed,
+    redetect: detect,
+  } = useProbes();
 
   const support = detection?.codecs.find((c) => c.codec === codec);
   const usable = support?.usable ?? [];
@@ -40,7 +50,9 @@ export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Pr
 
   // Codecs that have a hardware encoder on this machine (for the switch tip).
   const hwCodecs = (detection?.codecs ?? [])
-    .filter((c) => c.usable.some((e) => e.family !== "software") && c.codec !== codec)
+    .filter(
+      (c) => c.usable.some((e) => e.family !== "software") && c.codec !== codec,
+    )
     .map((c) => c.codec);
 
   return (
@@ -60,7 +72,11 @@ export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Pr
         </p>
       ) : failed ? (
         <p className="muted" style={{ marginTop: "var(--space-4)" }}>
-          Couldn't probe encoders. <button className="link-btn" onClick={detect}>Try again</button>.
+          Couldn't probe encoders.{" "}
+          <button className="link-btn" onClick={detect}>
+            Try again
+          </button>
+          .
         </p>
       ) : (
         <>
@@ -88,7 +104,9 @@ export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Pr
                 >
                   <span className="mc-codec">{CODEC_LABEL[c.codec]}</span>
                   <span className={`mc-badge ${hw ? "hw" : "cpu"}`}>
-                    {hw ? FAMILY_LABEL[hw.family].replace(/ \(.*\)/, "") : "CPU"}
+                    {hw
+                      ? FAMILY_LABEL[hw.family].replace(/ \(.*\)/, "")
+                      : "CPU"}
                   </span>
                 </button>
               );
@@ -97,19 +115,23 @@ export function EncoderPanel({ codec, encoderOverride, onOverride, onCodec }: Pr
 
           {hwForCodec ? (
             <p className="hw-note ok">
-              Using <strong>{FAMILY_LABEL[hwForCodec.family]}</strong> hardware acceleration for{" "}
-              {CODEC_LABEL[codec]}.
+              Using <strong>{FAMILY_LABEL[hwForCodec.family]}</strong> hardware
+              acceleration for {CODEC_LABEL[codec]}.
             </p>
           ) : (
             <p className="hw-note warn">
-              Your GPU doesn't hardware-encode {CODEC_LABEL[codec]}, so it will use your CPU
-              (slower, still safe).
+              Your GPU doesn't hardware-encode {CODEC_LABEL[codec]}, so it will
+              use your CPU (slower, still safe).
               {hwCodecs.length > 0 && (
                 <>
                   {" "}
                   For hardware speed:{" "}
                   {hwCodecs.map((c) => (
-                    <button key={c} className="link-btn" onClick={() => onCodec(c)}>
+                    <button
+                      key={c}
+                      className="link-btn"
+                      onClick={() => onCodec(c)}
+                    >
                       use {CODEC_LABEL[c]}
                     </button>
                   ))}

@@ -30,7 +30,12 @@ interface SummaryProps {
 }
 
 /** The compact readout that lives inside the floating action bar. */
-export function ReclaimSummary({ proj, refining, expanded, onToggle }: SummaryProps) {
+export function ReclaimSummary({
+  proj,
+  refining,
+  expanded,
+  onToggle,
+}: SummaryProps) {
   const hasBreakdown = proj.buckets.length > 0;
   return (
     <div className="ab-readout">
@@ -39,8 +44,13 @@ export function ReclaimSummary({ proj, refining, expanded, onToggle }: SummaryPr
         {proj.candidate_files === 1 ? "" : "s"} ·{" "}
         <span className="muted">{humanBytes(proj.candidate_bytes)}</span>
       </span>
-      <span className="ab-reclaim-group" title="Estimated space this run reclaims">
-        <span className="ab-reclaim">~{humanBytes(proj.est_reclaimable_bytes)}</span>
+      <span
+        className="ab-reclaim-group"
+        title="Estimated space this run reclaims"
+      >
+        <span className="ab-reclaim">
+          ~{humanBytes(proj.est_reclaimable_bytes)}
+        </span>
         <span className="ab-reclaim-label muted">reclaimable</span>
       </span>
       <span
@@ -74,12 +84,15 @@ export function ReclaimSummary({ proj, refining, expanded, onToggle }: SummaryPr
 
 /** The expanded panel: overall bar, sub-line, and the per-bucket breakdown. */
 export function ReclaimBreakdown({ proj }: { proj: ReclaimProjection }) {
-  const frac = reclaimFraction(proj.candidate_bytes, proj.est_reclaimable_bytes);
+  const frac = reclaimFraction(
+    proj.candidate_bytes,
+    proj.est_reclaimable_bytes,
+  );
   return (
     <div className="reclaim-breakdown">
       <div className="reclaim-sub muted">
-        <strong>~{humanBytes(proj.est_reclaimable_bytes)}</strong> reclaimable out
-        of {humanBytes(proj.candidate_bytes)}
+        <strong>~{humanBytes(proj.est_reclaimable_bytes)}</strong> reclaimable
+        out of {humanBytes(proj.candidate_bytes)}
         {proj.est_skipped_files > 0 && (
           <>
             {" · "}
@@ -92,7 +105,11 @@ export function ReclaimBreakdown({ proj }: { proj: ReclaimProjection }) {
         <span className="good" />
       </div>
 
-      <div className="reclaim-table" role="table" aria-label="Reclaimable by bucket">
+      <div
+        className="reclaim-table"
+        role="table"
+        aria-label="Reclaimable by bucket"
+      >
         <div className="reclaim-trow reclaim-thead" role="row">
           <span role="columnheader">Source</span>
           <span role="columnheader">Files</span>
@@ -107,7 +124,11 @@ export function ReclaimBreakdown({ proj }: { proj: ReclaimProjection }) {
               ? b.est_reclaimable_bytes / proj.est_reclaimable_bytes
               : 0;
           return (
-            <div className="reclaim-trow" role="row" key={`${b.src_codec}-${b.height_band}`}>
+            <div
+              className="reclaim-trow"
+              role="row"
+              key={`${b.src_codec}-${b.height_band}`}
+            >
               <span role="cell" className="reclaim-src">
                 <span className="reclaim-codec">{b.src_codec}</span>
                 <span className="muted">{b.height_band}</span>
@@ -123,8 +144,14 @@ export function ReclaimBreakdown({ proj }: { proj: ReclaimProjection }) {
                 className="reclaim-num reclaim-cell-bar"
                 title={`${Math.round(share * 100)}% of the total reclaimed space`}
               >
-                <span className="reclaim-amt">~{humanBytes(b.est_reclaimable_bytes)}</span>
-                <span className="bar" style={{ ["--p" as string]: share }} aria-hidden="true">
+                <span className="reclaim-amt">
+                  ~{humanBytes(b.est_reclaimable_bytes)}
+                </span>
+                <span
+                  className="bar"
+                  style={{ ["--p" as string]: share }}
+                  aria-hidden="true"
+                >
                   <span className="good" />
                 </span>
               </span>

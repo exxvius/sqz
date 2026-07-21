@@ -74,13 +74,18 @@ export function SettingsView({
 
   const hw = env?.detection?.codecs
     .filter((c) => c.selected && c.selected.family !== "software")
-    .map((c) => `${c.codec.toUpperCase()} · ${c.selected?.family.toUpperCase()}`);
+    .map(
+      (c) => `${c.codec.toUpperCase()} · ${c.selected?.family.toUpperCase()}`,
+    );
 
   return (
     <div className="view">
       <div className="view-head">
         <h2>Settings</h2>
-        <p>Appearance, bundled tooling, and data. Run options live under Home → Advanced and save automatically.</p>
+        <p>
+          Appearance, bundled tooling, and data. Run options live under Home →
+          Advanced and save automatically.
+        </p>
       </div>
 
       <div className="card">
@@ -102,7 +107,10 @@ export function SettingsView({
               value: a.id,
               label: (
                 <span className="accent-option">
-                  <span className="accent-dot" style={{ background: a.swatch }} />
+                  <span
+                    className="accent-dot"
+                    style={{ background: a.swatch }}
+                  />
                   {a.label}
                 </span>
               ),
@@ -114,8 +122,8 @@ export function SettingsView({
       <div className="card">
         <div className="card-title">When closing the window</div>
         <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>
-          Choose what the window's close button does. Minimizing keeps sqz running in the
-          system tray so encodes continue in the background.
+          Choose what the window's close button does. Minimizing keeps sqz
+          running in the system tray so encodes continue in the background.
         </p>
         <div className="seg" role="group" aria-label="Close behavior">
           {CLOSE_OPTIONS.map((o) => (
@@ -134,11 +142,18 @@ export function SettingsView({
       <div className="card">
         <div className="card-title">Lock</div>
         <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>
-          Locking hides file names and paths across the app and makes it read-only —
-          no run control, settings changes, or edits — useful when the machine is left
-          encoding unattended. Toggle it from the lock button in the sidebar. It's
-          currently{" "}
-          <strong>{lock.locked ? "locked" : lock.configured ? "unlocked" : "not set up"}</strong>.
+          Locking hides file names and paths across the app and makes it
+          read-only — no run control, settings changes, or edits — useful when
+          the machine is left encoding unattended. Toggle it from the lock
+          button in the sidebar. It's currently{" "}
+          <strong>
+            {lock.locked
+              ? "locked"
+              : lock.configured
+                ? "unlocked"
+                : "not set up"}
+          </strong>
+          .
         </p>
         <button
           className="btn"
@@ -169,8 +184,9 @@ export function SettingsView({
       <div className="card">
         <div className="card-title">Data</div>
         <p className="muted">
-          The manifest records every file sqz has read or touched. Manage individual entries in the
-          History tab, or wipe the whole database here.
+          The manifest records every file sqz has read or touched. Manage
+          individual entries in the History tab, or wipe the whole database
+          here.
         </p>
         <button
           className="btn danger"
@@ -203,13 +219,20 @@ export function SettingsView({
           <div className="card-title" style={{ margin: 0 }}>
             Environment
           </div>
-          <button className="btn ghost" onClick={loadEnv} disabled={envLoading || lock.locked}>
+          <button
+            className="btn ghost"
+            onClick={loadEnv}
+            disabled={envLoading || lock.locked}
+          >
             {envLoading ? "Checking…" : "Re-check"}
           </button>
         </div>
-        <p className="muted" style={{ margin: "var(--space-2) 0 var(--space-3)" }}>
-          What sqz detected on this machine. Encoders are validated by a real test
-          encode, not just assumed present.
+        <p
+          className="muted"
+          style={{ margin: "var(--space-2) 0 var(--space-3)" }}
+        >
+          What sqz detected on this machine. Encoders are validated by a real
+          test encode, not just assumed present.
         </p>
         {env ? (
           <dl className="kv-grid">
@@ -231,7 +254,11 @@ export function SettingsView({
                   : "not set up")}
             </dd>
             <dt>Hardware encoders</dt>
-            <dd>{hw && hw.length > 0 ? hw.join(", ") : "none detected (CPU fallback)"}</dd>
+            <dd>
+              {hw && hw.length > 0
+                ? hw.join(", ")
+                : "none detected (CPU fallback)"}
+            </dd>
           </dl>
         ) : (
           <p className="muted">{envLoading ? "Checking…" : "Unavailable."}</p>
@@ -241,8 +268,8 @@ export function SettingsView({
       <div className="card">
         <div className="card-title">Configuration</div>
         <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>
-          Save your run options to a file, or load them on another machine. Importing
-          replaces the current settings and reloads the app.
+          Save your run options to a file, or load them on another machine.
+          Importing replaces the current settings and reloads the app.
         </p>
         <div className="row" style={{ gap: "var(--space-2)" }}>
           <button className="btn" onClick={exportConfig} disabled={lock.locked}>
@@ -267,9 +294,9 @@ export function SettingsView({
       <div className="card">
         <div className="card-title">About</div>
         <p className="muted">
-          sqz is MIT-licensed. Released builds bundle GPL-licensed FFmpeg; the combined package is
-          governed by the GPL. FFmpeg is a trademark of Fabrice Bellard; sqz is not affiliated with
-          the FFmpeg project.
+          sqz is MIT-licensed. Released builds bundle GPL-licensed FFmpeg; the
+          combined package is governed by the GPL. FFmpeg is a trademark of
+          Fabrice Bellard; sqz is not affiliated with the FFmpeg project.
         </p>
       </div>
 

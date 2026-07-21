@@ -16,7 +16,8 @@ import {
 } from "../components/icons";
 import type { HealthState, Outcome, Status } from "./types";
 
-export type Tone = "ok" | "info" | "warn" | "bad" | "muted" | "accent" | "violet";
+export type Tone =
+  "ok" | "info" | "warn" | "bad" | "muted" | "accent" | "violet";
 
 export interface StatusMeta {
   label: string;
@@ -32,7 +33,11 @@ export function outcomeMeta(o: Outcome): StatusMeta {
     case "normalized":
       return { label: "Normalized", sym: <NormalizedIcon />, tone: "violet" };
     case "skipped_efficient":
-      return { label: "Already efficient", sym: <EfficientIcon />, tone: "muted" };
+      return {
+        label: "Already efficient",
+        sym: <EfficientIcon />,
+        tone: "muted",
+      };
     case "skipped_marginal":
       return { label: "Lean — skipped", sym: <LeanIcon />, tone: "muted" };
     case "skipped_no_gain":
@@ -40,7 +45,11 @@ export function outcomeMeta(o: Outcome): StatusMeta {
     case "skipped_unhealthy":
       return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
     case "original_kept":
-      return { label: "Original kept", sym: <NormalizedIcon />, tone: "violet" };
+      return {
+        label: "Original kept",
+        sym: <NormalizedIcon />,
+        tone: "violet",
+      };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "cancelled":
@@ -57,7 +66,11 @@ export function statusMeta(s: Status): StatusMeta {
     case "normalized":
       return { label: "Normalized", sym: <NormalizedIcon />, tone: "violet" };
     case "skipped_already_efficient":
-      return { label: "Already efficient", sym: <EfficientIcon />, tone: "muted" };
+      return {
+        label: "Already efficient",
+        sym: <EfficientIcon />,
+        tone: "muted",
+      };
     case "skipped_marginal":
       return { label: "Lean — skipped", sym: <LeanIcon />, tone: "muted" };
     case "skipped_no_gain":
@@ -65,7 +78,11 @@ export function statusMeta(s: Status): StatusMeta {
     case "skipped_unhealthy":
       return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
     case "original_kept":
-      return { label: "Original kept", sym: <NormalizedIcon />, tone: "violet" };
+      return {
+        label: "Original kept",
+        sym: <NormalizedIcon />,
+        tone: "violet",
+      };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "processing":

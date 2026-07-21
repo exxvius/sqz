@@ -26,7 +26,9 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const un = listen<FfmpegProgress>("sqz-ffmpeg-progress", (e) => setProgress(e.payload));
+    const un = listen<FfmpegProgress>("sqz-ffmpeg-progress", (e) =>
+      setProgress(e.payload),
+    );
     return () => {
       un.then((f) => f());
     };
@@ -70,7 +72,8 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
   };
 
   const present = ff?.present ?? false;
-  const frac = progress && progress.total > 0 ? progress.downloaded / progress.total : 0;
+  const frac =
+    progress && progress.total > 0 ? progress.downloaded / progress.total : 0;
 
   return (
     <div>
@@ -80,7 +83,8 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
           <span>
             {present ? (
               <>
-                FFmpeg ready · <span className="muted">{SOURCE_LABEL[ff!.source]}</span>
+                FFmpeg ready ·{" "}
+                <span className="muted">{SOURCE_LABEL[ff!.source]}</span>
               </>
             ) : (
               "FFmpeg is required to encode. Download it (one click) or point sqz at your own."
@@ -94,7 +98,10 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
           <div className="bar tall" style={{ "--p": frac } as CSSProperties}>
             <span />
           </div>
-          <div className="muted" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}>
+          <div
+            className="muted"
+            style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}
+          >
             {progress.stage === "extract"
               ? "Extracting…"
               : `Downloading ${humanBytes(progress.downloaded)}${
@@ -104,9 +111,16 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
         </div>
       ) : null}
 
-      <div className="card-actions" style={{ marginTop: compact ? "var(--space-2)" : 0 }}>
+      <div
+        className="card-actions"
+        style={{ marginTop: compact ? "var(--space-2)" : 0 }}
+      >
         {!present && (
-          <button className="btn primary" onClick={download} disabled={busy || locked}>
+          <button
+            className="btn primary"
+            onClick={download}
+            disabled={busy || locked}
+          >
             {busy ? "Downloading…" : "Download FFmpeg"}
           </button>
         )}
@@ -115,11 +129,19 @@ export function FfmpegSetup({ ff, onChange, compact }: Props) {
             Re-download
           </button>
         )}
-        <button className="btn ghost" onClick={useOwn} disabled={busy || locked}>
+        <button
+          className="btn ghost"
+          onClick={useOwn}
+          disabled={busy || locked}
+        >
           Use my own…
         </button>
         {ff?.source === "custom" && (
-          <button className="btn ghost" onClick={reset} disabled={busy || locked}>
+          <button
+            className="btn ghost"
+            onClick={reset}
+            disabled={busy || locked}
+          >
             <RestoreIcon /> Reset to auto
           </button>
         )}

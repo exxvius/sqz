@@ -114,7 +114,9 @@ export function AdvancedOptions({ config, patch }: Props) {
   return (
     <>
       <div className="card">
-        <div className="card-title">Original files after a successful encode</div>
+        <div className="card-title">
+          Original files after a successful encode
+        </div>
         <div className="seg" role="group" aria-label="Disposal of originals">
           {DISPOSAL.map((d) => (
             <button
@@ -128,27 +130,44 @@ export function AdvancedOptions({ config, patch }: Props) {
         </div>
         {config.on_success === "delete" && (
           <p className="muted" style={{ marginTop: "var(--space-3)" }}>
-            Originals are permanently deleted — but only after a smaller, verified replacement is in
-            place. Keep both or Recycle Bin are safer choices.
+            Originals are permanently deleted — but only after a smaller,
+            verified replacement is in place. Keep both or Recycle Bin are safer
+            choices.
           </p>
         )}
         {config.on_success === "nowhere" && (
           <p className="muted" style={{ marginTop: "var(--space-3)" }}>
-            The original is left untouched and the encoded copy is written alongside it (a numbered
-            name like “Movie (1).mkv” if they’d collide). Nothing is replaced — you keep both files.
+            The original is left untouched and the encoded copy is written
+            alongside it (a numbered name like “Movie (1).mkv” if they’d
+            collide). Nothing is replaced — you keep both files.
           </p>
         )}
         {config.on_success === "holding" && (
-          <div className="field field-stack" style={{ marginTop: "var(--space-3)" }}>
+          <div
+            className="field field-stack"
+            style={{ marginTop: "var(--space-3)" }}
+          >
             <label>
               Holding folder
               <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                Originals are moved here, keeping their filename (a numbered suffix is added if two
-                would collide). Leave as the default app folder or choose your own.
+                Originals are moved here, keeping their filename (a numbered
+                suffix is added if two would collide). Leave as the default app
+                folder or choose your own.
               </div>
             </label>
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", width: "100%" }}>
-              <span className="path" style={{ flex: 1, minWidth: 0 }} title={config.holding_dir ?? undefined}>
+            <div
+              style={{
+                display: "flex",
+                gap: "var(--space-2)",
+                alignItems: "center",
+                width: "100%",
+              }}
+            >
+              <span
+                className="path"
+                style={{ flex: 1, minWidth: 0 }}
+                title={config.holding_dir ?? undefined}
+              >
                 {config.holding_dir ?? "Default app folder"}
               </span>
               <button
@@ -161,7 +180,10 @@ export function AdvancedOptions({ config, patch }: Props) {
                 <FolderIcon /> Choose…
               </button>
               {config.holding_dir && (
-                <button className="mini-btn" onClick={() => patch({ holding_dir: null })}>
+                <button
+                  className="mini-btn"
+                  onClick={() => patch({ holding_dir: null })}
+                >
                   <RestoreIcon /> Reset
                 </button>
               )}
@@ -196,8 +218,9 @@ export function AdvancedOptions({ config, patch }: Props) {
               <label>
                 Bit depth
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  10-bit improves compression and reduces banding, even from an 8-bit source.
-                  AV1 and HEVC support it; hardware H.264 falls back to 8-bit.
+                  10-bit improves compression and reduces banding, even from an
+                  8-bit source. AV1 and HEVC support it; hardware H.264 falls
+                  back to 8-bit.
                 </div>
               </label>
               <Select
@@ -211,7 +234,8 @@ export function AdvancedOptions({ config, patch }: Props) {
               <label>
                 Audio
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  Copy keeps audio untouched. Opus/AAC shrink large tracks (MP4 uses AAC).
+                  Copy keeps audio untouched. Opus/AAC shrink large tracks (MP4
+                  uses AAC).
                 </div>
               </label>
               <Select
@@ -249,9 +273,9 @@ export function AdvancedOptions({ config, patch }: Props) {
               <label>
                 Downscale filter
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  Only used when a source is taller than the max height. Lanczos is
-                  sharpest but rings at high-contrast edges; Area avoids ringing and
-                  keeps hard edges clean.
+                  Only used when a source is taller than the max height. Lanczos
+                  is sharpest but rings at high-contrast edges; Area avoids
+                  ringing and keeps hard edges clean.
                 </div>
               </label>
               <Select
@@ -316,8 +340,9 @@ export function AdvancedOptions({ config, patch }: Props) {
               <label>
                 Encoder speed
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  Speed vs. quality-per-size on the hardware (NVENC) encoder. Slower is
-                  smaller/better; faster reclaims sooner. Balanced is a good default.
+                  Speed vs. quality-per-size on the hardware (NVENC) encoder.
+                  Slower is smaller/better; faster reclaims sooner. Balanced is
+                  a good default.
                 </div>
               </label>
               <Select
@@ -422,24 +447,26 @@ export function AdvancedOptions({ config, patch }: Props) {
               <label>
                 Verification depth
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  How much of each output to decode before trusting it. Stricter is
-                  safer but slower.
+                  How much of each output to decode before trusting it. Stricter
+                  is safer but slower.
                 </div>
               </label>
               <Select
                 value={config.verify_depth}
                 options={VERIFY_OPTIONS}
                 ariaLabel="Verification depth"
-                onChange={(v) => patch({ verify_depth: v as VerifyDepth, paranoid: false })}
+                onChange={(v) =>
+                  patch({ verify_depth: v as VerifyDepth, paranoid: false })
+                }
               />
             </div>
             <div className="field">
               <label>
                 Health-check before encoding
                 <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                  Check each source before encoding it. Unreadable or corrupt files
-                  are skipped and flagged, never encoded. Deep also decode-probes the
-                  source to catch silent corruption.
+                  Check each source before encoding it. Unreadable or corrupt
+                  files are skipped and flagged, never encoded. Deep also
+                  decode-probes the source to catch silent corruption.
                 </div>
               </label>
               <Select
@@ -478,7 +505,9 @@ export function AdvancedOptions({ config, patch }: Props) {
                 min={0}
                 max={365}
                 step={1}
-                onChange={(holding_retention_days) => patch({ holding_retention_days })}
+                onChange={(holding_retention_days) =>
+                  patch({ holding_retention_days })
+                }
               />
             )}
             <Switch

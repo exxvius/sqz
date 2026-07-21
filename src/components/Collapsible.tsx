@@ -11,7 +11,11 @@ export function Collapsible({ title, children, defaultOpen }: Props) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   return (
     <div className={`clps${open ? " open" : ""}`}>
-      <button className="clps-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button
+        className="clps-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
         <span className="clps-caret" aria-hidden>
           ›
         </span>

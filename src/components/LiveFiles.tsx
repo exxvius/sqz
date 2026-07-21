@@ -11,8 +11,11 @@ interface Props {
 }
 
 function projify(f: ActiveFile, minSavings: number) {
-  const progress = f.duration && f.duration > 0 ? Math.min(f.sec / f.duration, 1) : 0;
-  const projected = f.projections.length ? f.projections[f.projections.length - 1] : null;
+  const progress =
+    f.duration && f.duration > 0 ? Math.min(f.sec / f.duration, 1) : 0;
+  const projected = f.projections.length
+    ? f.projections[f.projections.length - 1]
+    : null;
   const savings = projected != null ? 1 - projected / f.srcSize : null;
 
   // Trend from the recent projection window: rising size = worsening.
@@ -52,7 +55,8 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
   if (active.length === 0) {
     return (
       <div className="empty">
-        No active encodes. Add videos on the Home tab and press <strong>Start</strong>.
+        No active encodes. Add videos on the Home tab and press{" "}
+        <strong>Start</strong>.
       </div>
     );
   }
@@ -66,11 +70,16 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
         // The pre-encode bar (health check, then any VMAF search) drives the bar
         // and hides the encode stats until the real encode starts.
         const preEncode = checkingHealth || searching;
-        const preFrac = checkingHealth ? (f.healthFrac ?? 0) : (f.searchFrac ?? 0);
+        const preFrac = checkingHealth
+          ? (f.healthFrac ?? 0)
+          : (f.searchFrac ?? 0);
         return (
           <div className="live-card" key={f.path}>
             <div className="live-top">
-              <span className="live-name" title={locked ? maskPath(f.path) : f.path}>
+              <span
+                className="live-name"
+                title={locked ? maskPath(f.path) : f.path}
+              >
                 {maskName(f.name)}
               </span>
               {!locked && (
@@ -81,59 +90,70 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
             </div>
 
             {checkingHealth ? (
-              <div className="live-quality">Checking health… {pct(f.healthFrac ?? 0)}</div>
+              <div className="live-quality">
+                Checking health… {pct(f.healthFrac ?? 0)}
+              </div>
             ) : searching ? (
               <div className="live-quality">
                 Finding best quality… {pct(f.searchFrac ?? 0)}
                 {f.searchEta != null && ` · ~${fmtDuration(f.searchEta)} left`}
               </div>
             ) : (
-              f.qualityNote && <div className="live-quality">{f.qualityNote}</div>
+              f.qualityNote && (
+                <div className="live-quality">{f.qualityNote}</div>
+              )
             )}
 
             <div
               className="bar tall"
-              style={{ "--p": preEncode ? preFrac : d.progress } as CSSProperties}
+              style={
+                { "--p": preEncode ? preFrac : d.progress } as CSSProperties
+              }
             >
               <span className={preEncode ? "" : d.klass} />
             </div>
 
             {preEncode ? null : (
-            <div className="live-stats">
-              <Stat k="progress" v={pct(d.progress)} />
-              <Stat k="source" v={humanBytes(f.srcSize)} />
-              <Stat
-                k="now"
-                v={f.outBytes != null ? humanBytes(f.outBytes) : "—"}
-              />
-              <Stat
-                k="projected"
-                v={
-                  d.projected != null ? (
-                    <>
-                      {humanBytes(d.projected)}
-                      {d.trend && (
-                        <span className={`trend ${d.trend}`}>
-                          {" "}
-                          {d.trend === "up" ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    "…"
-                  )
-                }
-                klass={d.klass}
-              />
-              <Stat
-                k="savings"
-                v={d.savings != null ? `${(d.savings * 100).toFixed(0)}%` : "…"}
-                klass={d.klass}
-              />
-              <Stat k="speed" v={f.speed != null ? `${f.speed.toFixed(2)}×` : "—"} />
-              <Stat k="fps" v={f.fps != null ? f.fps.toFixed(0) : "—"} />
-              <Stat k="eta" v={d.eta != null ? fmtDuration(d.eta) : "—"} />
-            </div>
+              <div className="live-stats">
+                <Stat k="progress" v={pct(d.progress)} />
+                <Stat k="source" v={humanBytes(f.srcSize)} />
+                <Stat
+                  k="now"
+                  v={f.outBytes != null ? humanBytes(f.outBytes) : "—"}
+                />
+                <Stat
+                  k="projected"
+                  v={
+                    d.projected != null ? (
+                      <>
+                        {humanBytes(d.projected)}
+                        {d.trend && (
+                          <span className={`trend ${d.trend}`}>
+                            {" "}
+                            {d.trend === "up" ? "▲" : "▼"}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      "…"
+                    )
+                  }
+                  klass={d.klass}
+                />
+                <Stat
+                  k="savings"
+                  v={
+                    d.savings != null ? `${(d.savings * 100).toFixed(0)}%` : "…"
+                  }
+                  klass={d.klass}
+                />
+                <Stat
+                  k="speed"
+                  v={f.speed != null ? `${f.speed.toFixed(2)}×` : "—"}
+                />
+                <Stat k="fps" v={f.fps != null ? f.fps.toFixed(0) : "—"} />
+                <Stat k="eta" v={d.eta != null ? fmtDuration(d.eta) : "—"} />
+              </div>
             )}
           </div>
         );
@@ -142,15 +162,7 @@ export function LiveFiles({ active, minSavings, onAbort }: Props) {
   );
 }
 
-function Stat({
-  k,
-  v,
-  klass,
-}: {
-  k: string;
-  v: ReactNode;
-  klass?: string;
-}) {
+function Stat({ k, v, klass }: { k: string; v: ReactNode; klass?: string }) {
   return (
     <div className="live-stat">
       <span className="lk">{k}</span>
