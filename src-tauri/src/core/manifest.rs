@@ -237,11 +237,11 @@ impl Manifest {
         retry_failed: bool,
     ) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
-        let existing: Option<(i64, f64, String)> = conn
+        let existing: Option<(i64, Option<i64>, f64, String)> = conn
             .query_row(
-                "SELECT size, mtime, status FROM files WHERE path=?1",
+                "SELECT size, out_size, mtime, status FROM files WHERE path=?1",
                 params![path],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .ok();
 
@@ -252,8 +252,19 @@ impl Manifest {
                     params![path, size as i64, mtime, STATUS_PENDING, now()],
                 )?;
             }
-            Some((old_size, old_mtime, status)) => {
-                let changed = old_size != size as i64 || (old_mtime - mtime).abs() > MTIME_TOL_SECS;
+            Some((old_size, old_out_size, old_mtime, status)) => {
+                // For a re-encoded row the file on disk is the *output*, so compare
+                // the discovered size against the output size — `size` still holds
+                // the (larger) source size for History's "before". Without this, a
+                // re-discovered output looks "changed" every run and gets needlessly
+                // reprocessed. mtime is preserved onto the output, so it still guards.
+                let current_size = if status == STATUS_DONE || status == STATUS_NORMALIZED {
+                    old_out_size.unwrap_or(old_size)
+                } else {
+                    old_size
+                };
+                let changed =
+                    current_size != size as i64 || (old_mtime - mtime).abs() > MTIME_TOL_SECS;
                 let failed_retry = retry_failed && status == STATUS_FAILED;
                 // An `indexed` row is a library-only entry (health-scanned, never
                 // queued). When a run discovers it, promote it to `pending` so a
@@ -984,6 +995,34 @@ mod tests {
         m.set_status("/a.mkv", STATUS_DONE, &StatusUpdate::default())
             .unwrap();
         m.upsert_scanned("/a.mkv", 200, 2.0, false, true).unwrap(); // changed
+        assert_eq!(m.pending_paths().unwrap(), vec!["/a.mkv".to_string()]);
+    }
+
+    #[test]
+    fn rediscovered_output_is_not_reprocessed_but_a_real_change_still_is() {
+        let m = mem_db();
+        // Encode: source 100 → output 40, done, row keyed by the output.
+        m.upsert_scanned("/a.mp4", 100, 5.0, false, true).unwrap();
+        m.set_status(
+            "/a.mp4",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_size: Some(40),
+                saved_bytes: Some(60),
+                out_ext: Some("mkv".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        m.rename_path("/a.mp4", "/a.mkv").unwrap();
+
+        // A later run re-discovers the output at its real (40-byte) size + same
+        // mtime — it must stay done, not churn back to pending.
+        m.upsert_scanned("/a.mkv", 40, 5.0, false, true).unwrap();
+        assert!(m.pending_paths().unwrap().is_empty());
+
+        // But a genuine change (the file was actually replaced) still re-queues it.
+        m.upsert_scanned("/a.mkv", 55, 9.0, false, true).unwrap();
         assert_eq!(m.pending_paths().unwrap(), vec!["/a.mkv".to_string()]);
     }
 
