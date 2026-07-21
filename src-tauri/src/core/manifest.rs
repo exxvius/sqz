@@ -124,7 +124,11 @@ pub struct HistoryRow {
 pub struct LibraryRow {
     pub path: String,
     pub status: String,
+    /// The original source size (History's "before").
     pub size: Option<u64>,
+    /// The re-encoded output's size, for a done/normalized row — the *current*
+    /// on-disk file's size, which the Library shows in preference to `size`.
+    pub out_size: Option<u64>,
     pub src_codec: Option<String>,
     pub height: Option<u32>,
     /// One of the `health::HealthState` slugs, or `None` if never scanned.
@@ -585,7 +589,7 @@ impl Manifest {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT path, status, size, src_codec, height, health, health_detail, \
+            "SELECT path, status, size, out_size, src_codec, height, health, health_detail, \
              health_checked_at, out_ext, cur_codec, cur_height, updated_at FROM files",
         );
         // Only scanned files belong to the Library — never the raw encode queue.
@@ -712,6 +716,28 @@ impl Manifest {
         Ok(())
     }
 
+    /// After a restore, re-point the output row (`from_output`) back at the
+    /// restored original (`orig`) instead of deleting it — the original is the
+    /// exact file that was cached, so its VMAF-resolved CRF, size/mtime, and source
+    /// codec/height stay valid. The encode-result and current-file fields are
+    /// cleared and the row goes back to `indexed`, so a later run re-encodes it
+    /// *reusing* the cached per-title CRF rather than re-running the search. Any
+    /// stale row already at `orig` is dropped first.
+    pub fn revert_to_source(&self, from_output: &str, orig: &str) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM files WHERE path=?1", params![orig])?;
+        tx.execute(
+            "UPDATE files SET path=?1, status=?2, out_size=NULL, saved_bytes=NULL, \
+             error=NULL, encode_ms=NULL, fallback=NULL, out_ext=NULL, orig_path=NULL, \
+             held_path=NULL, cur_codec=NULL, cur_height=NULL, health=NULL, \
+             health_detail=NULL, health_checked_at=NULL, updated_at=?3 WHERE path=?4",
+            params![orig, STATUS_INDEXED, now(), from_output],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Delete every row matching a history filter (used for "remove filtered").
     pub fn delete_matching(&self, q: &HistoryQuery) -> rusqlite::Result<usize> {
         use rusqlite::types::Value;
@@ -792,19 +818,20 @@ fn row_to_library(r: &rusqlite::Row) -> rusqlite::Result<LibraryRow> {
         path: r.get(0)?,
         status: r.get(1)?,
         size: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
-        src_codec: r.get(3)?,
+        out_size: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+        src_codec: r.get(4)?,
         height: r
-            .get::<_, Option<i64>>(4)?
+            .get::<_, Option<i64>>(5)?
             .and_then(|v| u32::try_from(v).ok()),
-        health: r.get(5)?,
-        health_detail: r.get(6)?,
-        health_checked_at: r.get(7)?,
-        out_ext: r.get(8)?,
-        cur_codec: r.get(9)?,
+        health: r.get(6)?,
+        health_detail: r.get(7)?,
+        health_checked_at: r.get(8)?,
+        out_ext: r.get(9)?,
+        cur_codec: r.get(10)?,
         cur_height: r
-            .get::<_, Option<i64>>(10)?
+            .get::<_, Option<i64>>(11)?
             .and_then(|v| u32::try_from(v).ok()),
-        updated_at: r.get(11)?,
+        updated_at: r.get(12)?,
     })
 }
 
@@ -1246,6 +1273,35 @@ mod tests {
         let hist = m.history(&HistoryQuery::default()).unwrap();
         assert_eq!(hist.len(), 1);
         assert_eq!(hist[0].path, "/a.mkv");
+    }
+
+    #[test]
+    fn revert_to_source_rekeys_and_keeps_the_vmaf_cache() {
+        let m = mem_db();
+        // Encode: source row gets a VMAF cache, becomes done, and re-keys to output.
+        m.upsert_scanned("/a.mp4", 100, 5.0, false, true).unwrap();
+        m.set_vmaf_crf("/a.mp4", 28, 95.0).unwrap();
+        m.set_status(
+            "/a.mp4",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_ext: Some("mkv".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        m.rename_path("/a.mp4", "/a.mkv").unwrap();
+
+        // Restore re-points the row back at the original instead of deleting it.
+        m.revert_to_source("/a.mkv", "/a.mp4").unwrap();
+
+        // The cache for the (unchanged) original survives — a re-encode reuses it.
+        assert_eq!(m.cached_vmaf_crf("/a.mp4", 100, 5.0, 95.0), Some(28));
+        // And a run re-discovering it re-queues the original (indexed → pending),
+        // still cache-hot.
+        m.upsert_scanned("/a.mp4", 100, 5.0, false, true).unwrap();
+        assert_eq!(m.pending_paths().unwrap(), vec!["/a.mp4".to_string()]);
+        assert_eq!(m.cached_vmaf_crf("/a.mp4", 100, 5.0, 95.0), Some(28));
     }
 
     #[test]

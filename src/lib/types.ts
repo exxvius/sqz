@@ -174,6 +174,9 @@ export interface LibraryRow {
   path: string;
   status: Status;
   size: number | null;
+  /** The re-encoded output size (current on-disk file) for a done/normalized row;
+   *  the Library shows this in preference to `size`. */
+  out_size: number | null;
   src_codec: string | null;
   height: number | null;
   health: HealthState | null;

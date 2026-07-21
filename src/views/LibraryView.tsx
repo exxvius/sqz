@@ -509,10 +509,10 @@ export function LibraryView({ goDashboard }: Props) {
                       </dd>
                     </>
                   )}
-                  {r.size != null && (
+                  {(r.out_size ?? r.size) != null && (
                     <>
                       <dt>size</dt>
-                      <dd>{humanBytes(r.size)}</dd>
+                      <dd>{humanBytes((r.out_size ?? r.size) as number)}</dd>
                     </>
                   )}
                   <dt>encode status</dt>

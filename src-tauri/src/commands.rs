@@ -1026,9 +1026,9 @@ pub async fn restore_original(path: String, state: State<'_, AppState>) -> Resul
             trash::delete(&encoded).map_err(|e| format!("could not recycle encoded file: {e}"))?;
         }
         move_across(&held, &orig).map_err(|e| format!("could not restore original: {e}"))?;
-        // The output row no longer reflects a file on disk; drop it. A future scan
-        // or run re-indexes the restored original.
-        let _ = m.delete_one(&path);
+        // Keep the row: re-point it at the restored original so its VMAF cache and
+        // history survive (a re-encode reuses the cached CRF instead of re-searching).
+        let _ = m.revert_to_source(&path, &orig.to_string_lossy());
         Ok(())
     })
     .await
