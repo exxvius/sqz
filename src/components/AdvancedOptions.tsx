@@ -114,7 +114,7 @@ export function AdvancedOptions({ config, patch }: Props) {
   return (
     <>
       <div className="card">
-        <div className="card-title">After a successful encode, the original…</div>
+        <div className="card-title">Original files after a successful encode</div>
         <div className="seg" role="group" aria-label="Disposal of originals">
           {DISPOSAL.map((d) => (
             <button
