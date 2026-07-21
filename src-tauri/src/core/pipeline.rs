@@ -175,15 +175,21 @@ fn try_remux(
         cleanup(&out);
         return None;
     }
-    let final_path = match super::replace::replace_original(cfg, src, &out) {
-        Ok(o) => o.final_path,
+    let swap = match super::replace::replace_original(cfg, src, &out) {
+        Ok(o) => o,
         Err(_) => {
             cleanup(&out);
             return None;
         }
     };
+    let final_path = swap.final_path;
     let saved = size as i64 - out_size as i64;
     let out_ext = cfg.container.ext().to_string();
+    // Holding mode moved the original aside for a normalize too — record its source
+    // path (restore target) and held path so a normalized file is just as
+    // restorable as a re-encode; its original was replaced the same way.
+    let orig_path = swap.held_path.is_some().then(|| path_str.to_string());
+    let held_path = swap.held_path.map(|p| p.to_string_lossy().into_owned());
     set(
         manifest,
         path_str,
@@ -192,6 +198,8 @@ fn try_remux(
             out_size: Some(out_size),
             saved_bytes: Some(saved),
             out_ext: Some(out_ext.clone()),
+            orig_path,
+            held_path,
             ..meta_of(info)
         },
     );

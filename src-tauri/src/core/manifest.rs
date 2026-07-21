@@ -885,6 +885,34 @@ mod tests {
     }
 
     #[test]
+    fn normalized_file_in_holding_is_restorable() {
+        // A container-normalize in Holding mode moves the original aside just like a
+        // re-encode, so it must record orig/held paths and be restorable too.
+        let m = mem_db();
+        m.upsert_scanned("/movie.avi", 100, 1.0, false, true)
+            .unwrap();
+        m.set_status(
+            "/movie.avi",
+            STATUS_NORMALIZED,
+            &StatusUpdate {
+                out_size: Some(98),
+                saved_bytes: Some(2),
+                out_ext: Some("mkv".into()),
+                orig_path: Some("/movie.avi".into()),
+                held_path: Some("/holding/movie.avi".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // The row is keyed by the output after the pipeline re-keys it.
+        m.rename_path("/movie.avi", "/movie.mkv").unwrap();
+        assert_eq!(
+            m.restore_paths("/movie.mkv"),
+            Some(("/holding/movie.avi".into(), "/movie.avi".into()))
+        );
+    }
+
+    #[test]
     fn unchanged_terminal_file_is_not_reprocessed() {
         let m = mem_db();
         m.upsert_scanned("/a.mkv", 100, 1.0, false, true).unwrap();
