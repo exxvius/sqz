@@ -135,7 +135,8 @@ const HISTORY = {
       height: null,
       out_size: null,
       saved_bytes: null,
-      error: "ffprobe: moov atom not found — file is truncated or still being written",
+      error:
+        "ffprobe: moov atom not found — file is truncated or still being written",
       updated_at: now - 3600 * 33,
     },
     {
@@ -168,8 +169,18 @@ type Row = {
 };
 
 const SHOWS = [
-  "Breaking Bad", "The Expanse", "Chernobyl", "Fargo", "Severance", "Andor",
-  "The Bear", "Succession", "Better Call Saul", "Foundation", "Silo", "Cosmos",
+  "Breaking Bad",
+  "The Expanse",
+  "Chernobyl",
+  "Fargo",
+  "Severance",
+  "Andor",
+  "The Bear",
+  "Succession",
+  "Better Call Saul",
+  "Foundation",
+  "Silo",
+  "Cosmos",
 ];
 const GEN_RES = [720, 1080, 1080, 1080, 1440, 2160];
 let seq = 0;
@@ -193,23 +204,45 @@ function genRow(status: string): Row {
   const size = sizeFor(height, seq);
   seq += 1;
   const base: Row = {
-    path, status, height, updated_at,
-    size, src_codec: null, out_size: null, saved_bytes: null, error: null,
+    path,
+    status,
+    height,
+    updated_at,
+    size,
+    src_codec: null,
+    out_size: null,
+    saved_bytes: null,
+    error: null,
   };
   switch (status) {
     case "done": {
-      const codec = height >= 1080 ? (seq % 3 === 0 ? "hevc" : "h264") : "mpeg2video";
+      const codec =
+        height >= 1080 ? (seq % 3 === 0 ? "hevc" : "h264") : "mpeg2video";
       const out = Math.round(size * (0.42 + (seq % 4) * 0.03));
-      return { ...base, src_codec: codec, out_size: out, saved_bytes: size - out };
+      return {
+        ...base,
+        src_codec: codec,
+        out_size: out,
+        saved_bytes: size - out,
+      };
     }
     case "normalized": {
       const out = Math.round(size * 0.98);
-      return { ...base, src_codec: "mpeg4", out_size: out, saved_bytes: size - out };
+      return {
+        ...base,
+        src_codec: "mpeg4",
+        out_size: out,
+        saved_bytes: size - out,
+      };
     }
     case "failed":
       return {
-        ...base, size, height: null, src_codec: null,
-        error: "ffprobe: moov atom not found — file is truncated or still being written",
+        ...base,
+        size,
+        height: null,
+        src_codec: null,
+        error:
+          "ffprobe: moov atom not found — file is truncated or still being written",
       };
     case "skipped_already_efficient":
       return { ...base, src_codec: seq % 2 ? "hevc" : "av1", saved_bytes: 0 };
@@ -244,12 +277,66 @@ const HOME_INPUTS = [
 // project_reclaim; Tier 2 (with the per-bucket breakdown) is emitted right after
 // via the sqz-projection event, mirroring the real backend.
 const HOME_BUCKETS = [
-  { src_codec: "h264", height_band: "2160p", files: 42, candidate_bytes: Math.round(980 * GB), est_reclaimable_bytes: Math.round(610 * GB), est_skipped_files: 0, sample_size: 46, confidence: 0.7 },
-  { src_codec: "hevc", height_band: "2160p", files: 26, candidate_bytes: Math.round(720 * GB), est_reclaimable_bytes: Math.round(300 * GB), est_skipped_files: 0, sample_size: 33, confidence: 0.62 },
-  { src_codec: "h264", height_band: "1080p", files: 44, candidate_bytes: Math.round(430 * GB), est_reclaimable_bytes: Math.round(250 * GB), est_skipped_files: 2, sample_size: 128, confidence: 0.86 },
-  { src_codec: "h264", height_band: "1440p", files: 14, candidate_bytes: Math.round(210 * GB), est_reclaimable_bytes: Math.round(124 * GB), est_skipped_files: 0, sample_size: 18, confidence: 0.47 },
-  { src_codec: "mpeg4", height_band: "≤720p", files: 6, candidate_bytes: Math.round(60 * GB), est_reclaimable_bytes: Math.round(42 * GB), est_skipped_files: 0, sample_size: 7, confidence: 0.26 },
-  { src_codec: "hevc", height_band: "1080p", files: 0, candidate_bytes: 0, est_reclaimable_bytes: 0, est_skipped_files: 6, sample_size: 40, confidence: 0.67 },
+  {
+    src_codec: "h264",
+    height_band: "2160p",
+    files: 42,
+    candidate_bytes: Math.round(980 * GB),
+    est_reclaimable_bytes: Math.round(610 * GB),
+    est_skipped_files: 0,
+    sample_size: 46,
+    confidence: 0.7,
+  },
+  {
+    src_codec: "hevc",
+    height_band: "2160p",
+    files: 26,
+    candidate_bytes: Math.round(720 * GB),
+    est_reclaimable_bytes: Math.round(300 * GB),
+    est_skipped_files: 0,
+    sample_size: 33,
+    confidence: 0.62,
+  },
+  {
+    src_codec: "h264",
+    height_band: "1080p",
+    files: 44,
+    candidate_bytes: Math.round(430 * GB),
+    est_reclaimable_bytes: Math.round(250 * GB),
+    est_skipped_files: 2,
+    sample_size: 128,
+    confidence: 0.86,
+  },
+  {
+    src_codec: "h264",
+    height_band: "1440p",
+    files: 14,
+    candidate_bytes: Math.round(210 * GB),
+    est_reclaimable_bytes: Math.round(124 * GB),
+    est_skipped_files: 0,
+    sample_size: 18,
+    confidence: 0.47,
+  },
+  {
+    src_codec: "mpeg4",
+    height_band: "≤720p",
+    files: 6,
+    candidate_bytes: Math.round(60 * GB),
+    est_reclaimable_bytes: Math.round(42 * GB),
+    est_skipped_files: 0,
+    sample_size: 7,
+    confidence: 0.26,
+  },
+  {
+    src_codec: "hevc",
+    height_band: "1080p",
+    files: 0,
+    candidate_bytes: 0,
+    est_reclaimable_bytes: 0,
+    est_skipped_files: 6,
+    sample_size: 40,
+    confidence: 0.67,
+  },
 ];
 const HOME_PROJECTION_T2 = {
   tier: 2,
@@ -273,15 +360,37 @@ const HOME_PROJECTION_T1 = {
 // Saved libraries for the Library scene — a named folder set + its own embedded
 // encode profile (the re-runnable unit unattended mode binds to). Movies, phone
 // clips, and a VR library each target something different.
-const prof = (o: Record<string, unknown>) => ({ ...defaultConfig(), inputs: [], ...o });
+const prof = (o: Record<string, unknown>) => ({
+  ...defaultConfig(),
+  inputs: [],
+  ...o,
+});
 const NO_CAP = 20000; // resolution-cap sentinel: never downscale
+// Watch config for a library (unattended mode). Off by default; a couple of
+// libraries below opt in so the automation surfaces have something to show.
+const wf = (o: Record<string, unknown> = {}) => ({
+  enabled: false,
+  trigger: { kind: "daily", hour: 3, minute: 0 },
+  idle_only: true,
+  ...o,
+});
 const LIBRARIES = [
   {
-    // Big files, target a perceptual quality rather than guessing a CRF.
+    // Big files, target a perceptual quality rather than guessing a CRF. Watched:
+    // processed overnight while away.
     id: "lib-movies",
     name: "Movies",
     roots: ["D:\\Media\\Movies"],
-    profile: prof({ codec: "av1", vmaf_target: 95, max_height: 1080, container: "mkv" }),
+    profile: prof({
+      codec: "av1",
+      vmaf_target: 95,
+      max_height: 1080,
+      container: "mkv",
+    }),
+    watch: wf({
+      enabled: true,
+      trigger: { kind: "daily", hour: 3, minute: 0 },
+    }),
     created_at: now - 86400 * 41,
     updated_at: now - 3600 * 6,
   },
@@ -291,17 +400,33 @@ const LIBRARIES = [
     id: "lib-home",
     name: "Home videos",
     roots: ["D:\\DCIM\\Camera", "E:\\Home Videos"],
-    profile: prof({ codec: "hevc", quality: "high-quality", max_height: NO_CAP, container: "mkv" }),
+    profile: prof({
+      codec: "hevc",
+      quality: "high-quality",
+      max_height: NO_CAP,
+      container: "mkv",
+    }),
+    watch: wf(),
     created_at: now - 86400 * 18,
     updated_at: now - 3600 * 30,
   },
   {
     // YouTube rips are already low-bitrate — chase max savings and skip the ones
-    // that won't shrink.
+    // that won't shrink. Watched on an interval to keep the folder tidy.
     id: "lib-youtube",
     name: "YouTube downloads",
     roots: ["D:\\Media\\YouTube"],
-    profile: prof({ codec: "av1", quality: "max-savings", max_height: 1080, container: "mp4", skip_marginal: true }),
+    profile: prof({
+      codec: "av1",
+      quality: "max-savings",
+      max_height: 1080,
+      container: "mp4",
+      skip_marginal: true,
+    }),
+    watch: wf({
+      enabled: true,
+      trigger: { kind: "interval", every_mins: 180 },
+    }),
     created_at: now - 86400 * 9,
     updated_at: now - 3600 * 20,
   },
@@ -310,11 +435,36 @@ const LIBRARIES = [
     id: "lib-tv",
     name: "TV shows",
     roots: ["D:\\Media\\TV"],
-    profile: prof({ codec: "av1", quality: "balanced", max_height: 1080, container: "mkv" }),
+    profile: prof({
+      codec: "av1",
+      quality: "balanced",
+      max_height: 1080,
+      container: "mkv",
+    }),
+    watch: wf(),
     created_at: now - 86400 * 5,
     updated_at: now - 1800,
   },
 ];
+
+/** Automation status derived from the watched libraries above. */
+const AUTOMATION = {
+  enabled: true,
+  entries: [
+    {
+      library_id: "lib-movies",
+      name: "Movies",
+      next_run_at: now + 3600 * 5,
+      last_auto_run_at: now - 3600 * 19,
+    },
+    {
+      library_id: "lib-youtube",
+      name: "YouTube downloads",
+      next_run_at: now + 60 * 40,
+      last_auto_run_at: now - 3600 * 2,
+    },
+  ],
+};
 
 /** Handle a mocked `invoke` for a given scene. */
 export function commandHandler(
@@ -340,7 +490,10 @@ export function commandHandler(
     case "detect_encoders":
       return DETECTION;
     case "scan_inputs":
-      return { count: HOME_PROJECTION_T2.candidate_files, total_bytes: HOME_PROJECTION_T2.candidate_bytes };
+      return {
+        count: HOME_PROJECTION_T2.candidate_files,
+        total_bytes: HOME_PROJECTION_T2.candidate_bytes,
+      };
     case "project_reclaim":
       // Tier 2 lands shortly after, once HomeView's listener is registered —
       // exactly the two-tier flow the real backend runs.
@@ -362,6 +515,11 @@ export function commandHandler(
     }
     case "list_libraries":
       return LIBRARIES;
+    case "get_automation":
+      return AUTOMATION;
+    case "set_automation_enabled":
+    case "run_library_now":
+      return null;
     case "get_library":
       // The saved-libraries panel is the subject; the scanned-file list below it
       // isn't in-frame, so a minimal payload is enough.
@@ -401,7 +559,9 @@ async function liveEncode(
       out_bytes: outBytes,
       fps,
       speed,
-      bitrate_kbps: outBytes ? Math.round((outBytes * 8) / 1000 / (duration * frac)) : null,
+      bitrate_kbps: outBytes
+        ? Math.round((outBytes * 8) / 1000 / (duration * frac))
+        : null,
     });
   }
 }
@@ -431,6 +591,13 @@ export const scenes: Record<string, (emit: Emit) => Promise<void>> = {
   history: async () => {},
   library: async () => {},
   dashboard: async (emit) => {
+    // Label this as an unattended run of the watched Movies library, so the Live
+    // tab shows both the automation panel and the "unattended run" badge.
+    await emit("sqz-run-source", {
+      source: "unattended",
+      library_id: "lib-movies",
+      library_name: "Movies",
+    });
     await emit("sqz-run-start", { total: 142 });
 
     // A nearly-finished run: emit a bulk of already-processed files so the meter,
@@ -450,23 +617,105 @@ export const scenes: Record<string, (emit: Emit) => Promise<void>> = {
     for (let i = 0; i < 115; i++) {
       const orig = Math.round((3 + (i % 9) * 0.6) * GB);
       const out = Math.round(orig * (0.4 + (i % 5) * 0.03));
-      await record(emit, bulkPath(k++), "done", orig, out, orig - out, "AV1 · NVENC · verified");
+      await record(
+        emit,
+        bulkPath(k++),
+        "done",
+        orig,
+        out,
+        orig - out,
+        "AV1 · NVENC · verified",
+      );
     }
     for (let i = 0; i < 5; i++) {
       const orig = Math.round((1.1 + (i % 3) * 0.2) * GB);
       const out = Math.round(orig * 0.98);
-      await record(emit, bulkPath(k++), "normalized", orig, out, orig - out, "Remuxed to MKV");
+      await record(
+        emit,
+        bulkPath(k++),
+        "normalized",
+        orig,
+        out,
+        orig - out,
+        "Remuxed to MKV",
+      );
     }
-    for (let i = 0; i < 7; i++) await record(emit, bulkPath(k++), "skipped_efficient", null, null, 0, "Already efficient");
-    for (let i = 0; i < 2; i++) await record(emit, bulkPath(k++), "failed", null, null, 0, "ffprobe: moov atom not found — file is truncated or still being written");
+    for (let i = 0; i < 7; i++)
+      await record(
+        emit,
+        bulkPath(k++),
+        "skipped_efficient",
+        null,
+        null,
+        0,
+        "Already efficient",
+      );
+    for (let i = 0; i < 2; i++)
+      await record(
+        emit,
+        bulkPath(k++),
+        "failed",
+        null,
+        null,
+        0,
+        "ffprobe: moov atom not found — file is truncated or still being written",
+      );
 
     // Curated recent files — emitted last, so they head the event log.
-    await record(emit, "D:\\Media\\Movies\\Blade Runner 2049 (2017) 2160p HDR.mkv", "done", Math.round(38.4 * GB), Math.round(15.1 * GB), Math.round(23.3 * GB), "AV1 · NVENC · verified");
-    await record(emit, "D:\\Media\\Movies\\Dune Part Two (2024) 2160p.mkv", "done", Math.round(41.2 * GB), Math.round(17.6 * GB), Math.round(23.6 * GB), "AV1 · NVENC · verified");
-    await record(emit, "D:\\Media\\Movies\\Sintel (2010) 1080p.mkv", "done", Math.round(1.12 * GB), Math.round(438 * MB), Math.round(0.69 * GB), "AV1 · NVENC · verified");
-    await record(emit, "D:\\Media\\Home\\Wedding 2011 (camcorder).avi", "normalized", Math.round(1.24 * GB), Math.round(1.19 * GB), Math.round(0.05 * GB), "Remuxed to MKV");
-    await record(emit, "D:\\Media\\TV\\Arcane\\S01E03 1080p HEVC.mkv", "skipped_efficient", null, null, 0, "Already HEVC at 1080p");
-    await record(emit, "D:\\Media\\Recordings\\Capture 2023-11-02.mkv", "failed", null, null, 0, "ffprobe: moov atom not found — file is truncated or still being written");
+    await record(
+      emit,
+      "D:\\Media\\Movies\\Blade Runner 2049 (2017) 2160p HDR.mkv",
+      "done",
+      Math.round(38.4 * GB),
+      Math.round(15.1 * GB),
+      Math.round(23.3 * GB),
+      "AV1 · NVENC · verified",
+    );
+    await record(
+      emit,
+      "D:\\Media\\Movies\\Dune Part Two (2024) 2160p.mkv",
+      "done",
+      Math.round(41.2 * GB),
+      Math.round(17.6 * GB),
+      Math.round(23.6 * GB),
+      "AV1 · NVENC · verified",
+    );
+    await record(
+      emit,
+      "D:\\Media\\Movies\\Sintel (2010) 1080p.mkv",
+      "done",
+      Math.round(1.12 * GB),
+      Math.round(438 * MB),
+      Math.round(0.69 * GB),
+      "AV1 · NVENC · verified",
+    );
+    await record(
+      emit,
+      "D:\\Media\\Home\\Wedding 2011 (camcorder).avi",
+      "normalized",
+      Math.round(1.24 * GB),
+      Math.round(1.19 * GB),
+      Math.round(0.05 * GB),
+      "Remuxed to MKV",
+    );
+    await record(
+      emit,
+      "D:\\Media\\TV\\Arcane\\S01E03 1080p HEVC.mkv",
+      "skipped_efficient",
+      null,
+      null,
+      0,
+      "Already HEVC at 1080p",
+    );
+    await record(
+      emit,
+      "D:\\Media\\Recordings\\Capture 2023-11-02.mkv",
+      "failed",
+      null,
+      null,
+      0,
+      "ffprobe: moov atom not found — file is truncated or still being written",
+    );
 
     // In-flight encodes at different states.
     await liveEncode(
