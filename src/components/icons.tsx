@@ -135,6 +135,15 @@ export function AddFolderIcon({ size = 15 }: IconProps) {
   );
 }
 
+/** Box with an in-arrow — import from a file. */
+export function ImportIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...filled(size)}>
+      <path d="M11 19h2v-4.175l1.6 1.6L16 15l-4-4l-4 4l1.425 1.4L11 14.825zm-7 3V2h10l6 6v14zm9-13V4H6v16h12V9zM6 4v5zv16z" />
+    </svg>
+  );
+}
+
 /** Floppy disk — save. */
 export function SaveIcon({ size = 15 }: IconProps) {
   return (

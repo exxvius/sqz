@@ -4,7 +4,7 @@ import { FfmpegSetup } from "../components/FfmpegSetup";
 import { PasswordModal } from "../components/PasswordModal";
 import { useConfirm } from "../components/ConfirmModal";
 import { Select } from "../components/Select";
-import { ExportIcon, RemoveIcon } from "../components/icons";
+import { ExportIcon, ImportIcon, RemoveIcon } from "../components/icons";
 import { api } from "../lib/api";
 import { ACCENTS, type Accent } from "../lib/accent";
 import { useLock } from "../lib/lock";
@@ -249,7 +249,7 @@ export function SettingsView({
             <ExportIcon /> Export settings
           </button>
           <button className="btn" onClick={importConfig} disabled={lock.locked}>
-            Import settings
+            <ImportIcon /> Import settings
           </button>
         </div>
         {lock.locked && (
