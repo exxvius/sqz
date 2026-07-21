@@ -135,10 +135,13 @@ fn try_remux(
         cleanup(&out);
         return None;
     }
-    if super::replace::replace_original(cfg, src, &out).is_err() {
-        cleanup(&out);
-        return None;
-    }
+    let final_path = match super::replace::replace_original(cfg, src, &out) {
+        Ok(fp) => fp,
+        Err(_) => {
+            cleanup(&out);
+            return None;
+        }
+    };
     let saved = size as i64 - out_size as i64;
     let out_ext = cfg.container.ext().to_string();
     set(
@@ -155,6 +158,9 @@ fn try_remux(
     // The original was replaced, so any prior health scan of it is now stale —
     // drop it from the Library (a rescan will pick up the new file).
     let _ = manifest.clear_health(path_str);
+    // Re-key the row to the file that exists now, so a rescan matches this row
+    // instead of adding a duplicate for the new extension. No-op if unchanged.
+    let _ = manifest.rename_path(path_str, &final_path.to_string_lossy());
     let mut r = ProcessResult::new(path_str, Outcome::Normalized);
     r.saved_bytes = saved;
     r.orig_size = Some(size);
@@ -699,6 +705,11 @@ pub fn process_file(
     } else {
         let _ = manifest.record_health(path_str, HealthState::Healthy.as_str(), None, None, None);
     }
+    // Re-key the row to the file that now exists on disk (the extension may have
+    // changed), so a later health scan updates this row instead of discovering the
+    // new path as a separate file and duplicating the Library entry. No-op when the
+    // extension is unchanged.
+    let _ = manifest.rename_path(path_str, &final_path.to_string_lossy());
 
     let mut result = ProcessResult::new(path_str, Outcome::Done);
     result.saved_bytes = saved;

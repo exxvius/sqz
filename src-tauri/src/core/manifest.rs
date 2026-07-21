@@ -624,6 +624,24 @@ impl Manifest {
         Ok(())
     }
 
+    /// Move a row to a new path key. Used when a re-encode changes the file's
+    /// extension (e.g. `.mp4` → `.mkv`): re-keying the row to the file that now
+    /// exists on disk keeps a later health scan from discovering it as a *new*
+    /// file and creating a duplicate Library entry. Any stale row already sitting
+    /// at `new` (e.g. a prior scan of a since-removed file) is dropped first so the
+    /// move can't hit the primary-key constraint. A no-op when `old == new`.
+    pub fn rename_path(&self, old: &str, new: &str) -> rusqlite::Result<()> {
+        if old == new {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM files WHERE path=?1", params![new])?;
+        tx.execute("UPDATE files SET path=?1 WHERE path=?2", params![new, old])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Delete one row from the manifest.
     pub fn delete_one(&self, path: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -1075,6 +1093,41 @@ mod tests {
         assert_eq!(m.library(&HistoryQuery::default()).unwrap().len(), 1);
         m.clear_health("/x.mkv").unwrap();
         assert!(m.library(&HistoryQuery::default()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rename_path_rekeys_a_row_and_replaces_a_stale_target() {
+        let m = mem_db();
+        // A done+healthy row still keyed by the source path (as an mp4→mkv encode
+        // leaves it before re-keying).
+        m.upsert_scanned("/a.mp4", 100, 1.0, false, true).unwrap();
+        m.set_status(
+            "/a.mp4",
+            STATUS_DONE,
+            &StatusUpdate {
+                out_ext: Some("mkv".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        m.record_health("/a.mp4", "healthy", None, None, None)
+            .unwrap();
+        // A stale row already sitting at the destination (e.g. a scan of a
+        // since-removed file) must not block the move.
+        m.upsert_indexed("/a.mkv", 1, 1.0).unwrap();
+
+        m.rename_path("/a.mp4", "/a.mkv").unwrap();
+
+        // Exactly one row now, at the destination, carrying the moved health/status.
+        let lib = m.library(&HistoryQuery::default()).unwrap();
+        assert_eq!(lib.len(), 1);
+        assert_eq!(lib[0].path, "/a.mkv");
+        assert_eq!(lib[0].health.as_deref(), Some("healthy"));
+        assert_eq!(lib[0].status, STATUS_DONE);
+        // The old source key is gone.
+        let hist = m.history(&HistoryQuery::default()).unwrap();
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].path, "/a.mkv");
     }
 
     #[test]
