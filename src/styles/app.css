@@ -1949,23 +1949,24 @@
   color: var(--bad);
 }
 
-/* Unattended-run badge on the Live tab. */
-.run-source-badge {
+/* The watched library currently running unattended — highlighted inside the
+   automation card in place of a separate top-of-page badge. */
+.lib-row.running {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  background: linear-gradient(160deg, var(--accent-quiet), transparent 80%);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--accent) 30%, transparent);
+}
+.lib-row.running .lib-name {
+  color: var(--accent);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin: var(--space-2) 0 0;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  color: var(--accent);
-  background: var(--accent-quiet);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--accent) 25%, transparent);
+  gap: 5px;
 }
-.run-source-badge svg {
+.lib-row.running .lib-name svg {
   filter: drop-shadow(
-    0 0 3px color-mix(in oklab, var(--accent) 45%, transparent)
+    0 0 4px color-mix(in oklab, var(--accent) 55%, transparent)
   );
 }
 

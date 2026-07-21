@@ -74,6 +74,13 @@ export function AutomationPanel() {
     await api.runLibraryNow(id);
   };
 
+  // Which watched library is being run unattended right now (to highlight its row
+  // in place of the old separate top-of-page badge).
+  const runningId =
+    store.running && store.runSource?.source === "unattended"
+      ? store.runSource.library_id
+      : null;
+
   return (
     <div className="card card-flat card-glow">
       <div className="card-head">
@@ -106,32 +113,44 @@ export function AutomationPanel() {
         </p>
       ) : (
         <div className="lib-list" style={{ marginTop: "var(--space-2)" }}>
-          {status.entries.map((e) => (
-            <div className="lib-row" key={e.library_id}>
-              <div className="lib-row-main">
-                <span className="lib-name">{e.name}</span>
-                <span className="muted lib-meta">
-                  {scheduleLabel(e, status.enabled, status.system_idle)}
-                  {e.last_auto_run_at
+          {status.entries.map((e) => {
+            const isRunning = e.library_id === runningId;
+            const meta = isRunning
+              ? store.paused
+                ? "running now — paused, you're active"
+                : "running now…"
+              : `${scheduleLabel(e, status.enabled, status.system_idle)}${
+                  e.last_auto_run_at
                     ? ` · last ran ${relativeTime(e.last_auto_run_at)}`
-                    : ""}
-                </span>
-              </div>
-              {!locked && (
-                <div className="lib-row-actions">
-                  <button
-                    className="mini-btn"
-                    onClick={() => runNow(e.library_id)}
-                    disabled={store.running}
-                    title="Run this library now"
-                    aria-label="Run now"
-                  >
-                    <PlayIcon /> Run now
-                  </button>
+                    : ""
+                }`;
+            return (
+              <div
+                className={`lib-row${isRunning ? " running" : ""}`}
+                key={e.library_id}
+              >
+                <div className="lib-row-main">
+                  <span className="lib-name">
+                    {isRunning && <WatchIcon size={13} />} {e.name}
+                  </span>
+                  <span className="muted lib-meta">{meta}</span>
                 </div>
-              )}
-            </div>
-          ))}
+                {!locked && !isRunning && (
+                  <div className="lib-row-actions">
+                    <button
+                      className="mini-btn"
+                      onClick={() => runNow(e.library_id)}
+                      disabled={store.running}
+                      title="Run this library now"
+                      aria-label="Run now"
+                    >
+                      <PlayIcon /> Run now
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

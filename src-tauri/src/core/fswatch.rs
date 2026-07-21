@@ -41,11 +41,21 @@ pub fn signature_of(libs: &[(String, Vec<PathBuf>)]) -> Vec<PathBuf> {
     sig
 }
 
+/// Called (with no arguments) whenever an event stamps at least one library
+/// dirty, so the supervisor can wake immediately instead of waiting for its next
+/// poll. Wrapped in an `Arc` so the watcher thread can hold it.
+pub type OnChange = Arc<dyn Fn() + Send + Sync>;
+
 /// Start a recursive watcher over every root in `libs`, stamping the owning
-/// library dirty in `dirty` on each relevant event. Returns `None` when there is
-/// nothing to watch or the platform watcher can't be created (best-effort — a
-/// failed watch just means that trigger never fires, never a crash).
-pub fn start(libs: &[(String, Vec<PathBuf>)], dirty: DirtyMap) -> Option<FsWatch> {
+/// library dirty in `dirty` on each relevant event and calling `on_change` to wake
+/// the supervisor. Returns `None` when there is nothing to watch or the platform
+/// watcher can't be created (best-effort — a failed watch just means that trigger
+/// never fires, never a crash).
+pub fn start(
+    libs: &[(String, Vec<PathBuf>)],
+    dirty: DirtyMap,
+    on_change: OnChange,
+) -> Option<FsWatch> {
     let signature = signature_of(libs);
     if signature.is_empty() {
         return None;
@@ -68,13 +78,21 @@ pub fn start(libs: &[(String, Vec<PathBuf>)], dirty: DirtyMap) -> Option<FsWatch
             return;
         }
         let now = now_secs();
-        let mut d = dirty.lock().unwrap();
-        for path in &ev.paths {
-            for (root, id) in &owners {
-                if path.starts_with(root) {
-                    d.insert(id.clone(), now);
+        let mut stamped = false;
+        {
+            let mut d = dirty.lock().unwrap();
+            for path in &ev.paths {
+                for (root, id) in &owners {
+                    if path.starts_with(root) {
+                        d.insert(id.clone(), now);
+                        stamped = true;
+                    }
                 }
             }
+        }
+        // Wake the supervisor so it can start the debounce clock right away.
+        if stamped {
+            on_change();
         }
     };
 
@@ -106,6 +124,7 @@ mod tests {
     #[test]
     fn empty_roots_have_empty_signature() {
         assert!(signature_of(&[]).is_empty());
-        assert!(start(&[], Arc::new(Mutex::new(HashMap::new()))).is_none());
+        let noop: OnChange = Arc::new(|| {});
+        assert!(start(&[], Arc::new(Mutex::new(HashMap::new())), noop).is_none());
     }
 }

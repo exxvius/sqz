@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { AutomationPanel } from "../components/AutomationPanel";
 import { EventLog } from "../components/EventLog";
 import { LiveFiles } from "../components/LiveFiles";
-import { ClearIcon, WatchIcon } from "../components/icons";
+import { ClearIcon } from "../components/icons";
 import { humanBytes } from "../lib/format";
 import { useStore } from "../lib/store";
 import { useLock } from "../lib/lock";
@@ -11,23 +11,12 @@ export function DashboardView() {
   const store = useStore();
   const { locked } = useLock();
   const active = Object.values(store.active);
-  const { session, summary, runSource } = store;
-  const unattended =
-    store.running && runSource?.source === "unattended"
-      ? runSource.library_name
-      : null;
+  const { session, summary } = store;
 
   return (
     <div className="view">
       <div className="view-head">
         <h2>Live progress</h2>
-        {unattended && (
-          <div className="run-source-badge">
-            <WatchIcon size={14} /> Unattended run of{" "}
-            <strong>{unattended}</strong>
-            {store.paused && " · paused — you're active"}
-          </div>
-        )}
         <p>
           {store.running
             ? store.paused

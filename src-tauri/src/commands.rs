@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -37,6 +37,36 @@ pub struct RunControl {
     pub paused: Arc<AtomicBool>,
 }
 
+/// Lets the filesystem watcher wake the supervisor early instead of it waiting out
+/// a full poll interval — so an `OnChange` library reacts within its debounce, not
+/// within a minute.
+pub struct Waker {
+    flag: Mutex<bool>,
+    cvar: Condvar,
+}
+
+impl Waker {
+    fn new() -> Self {
+        Self {
+            flag: Mutex::new(false),
+            cvar: Condvar::new(),
+        }
+    }
+
+    /// Wake the supervisor now (a filesystem event arrived).
+    pub fn notify(&self) {
+        *self.flag.lock().unwrap() = true;
+        self.cvar.notify_one();
+    }
+
+    /// Sleep until notified or `dur` elapses, then clear the flag.
+    fn wait(&self, dur: Duration) {
+        let guard = self.flag.lock().unwrap();
+        let (mut flag, _) = self.cvar.wait_timeout(guard, dur).unwrap();
+        *flag = false;
+    }
+}
+
 /// Global app state managed by Tauri.
 pub struct AppState {
     pub data_dir: PathBuf,
@@ -63,6 +93,8 @@ pub struct AppState {
     pub fs_dirty: fswatch::DirtyMap,
     /// The live filesystem watcher, rebuilt when the watched root set changes.
     pub fs_watch: Mutex<Option<FsWatch>>,
+    /// Early-wake channel from the filesystem watcher to the supervisor.
+    pub wake: Arc<Waker>,
     /// Password-gated lock: masks personal info and makes the app read-only.
     pub lock: Lock,
 }
@@ -82,6 +114,7 @@ impl AppState {
             automation_active: Mutex::new(None),
             fs_dirty: Arc::new(Mutex::new(HashMap::new())),
             fs_watch: Mutex::new(None),
+            wake: Arc::new(Waker::new()),
             lock,
         }
     }
@@ -1143,18 +1176,47 @@ pub fn run_library_now(
 /// The tick interval for the unattended supervisor.
 const SUPERVISOR_TICK_SECS: u64 = 60;
 
-/// Spawn the unattended supervisor: a background tick that steers an in-flight
-/// unattended run's pause state and launches at most one due library per tick.
+/// Spawn the unattended supervisor: a background loop that steers an in-flight
+/// unattended run's pause state and launches at most one due library per pass.
+/// Between passes it waits on the [`Waker`] — a filesystem event wakes it early, so
+/// an `OnChange` library fires within its debounce rather than at the next poll.
 /// Cheap and self-contained; started once from `lib.rs` after state is managed.
 pub fn spawn_supervisor(app: AppHandle) {
     std::thread::spawn(move || {
-        // Let startup (ffmpeg probe, window) settle before the first tick.
-        std::thread::sleep(Duration::from_secs(10));
+        // Let startup (ffmpeg probe, window) settle before the first pass.
+        std::thread::sleep(Duration::from_secs(5));
         loop {
             supervisor_tick(&app);
-            std::thread::sleep(Duration::from_secs(SUPERVISOR_TICK_SECS));
+            match app.try_state::<AppState>() {
+                Some(state) => {
+                    let wait = next_wait(&state);
+                    Arc::clone(&state.wake).wait(wait);
+                }
+                None => std::thread::sleep(Duration::from_secs(SUPERVISOR_TICK_SECS)),
+            }
         }
     });
+}
+
+/// How long to wait before the next supervisor pass: the shortest outstanding
+/// `OnChange` debounce among dirty libraries (so a just-changed library is picked
+/// up right when it settles), else the full poll interval.
+fn next_wait(state: &AppState) -> Duration {
+    let now = chrono::Local::now().timestamp() as f64;
+    let libs = library::load_all(&state.libraries_path());
+    let dirty = state.fs_dirty.lock().unwrap();
+    let mut soonest = SUPERVISOR_TICK_SECS as f64;
+    for l in &libs {
+        if let Trigger::OnChange { debounce_secs } = l.watch.trigger {
+            if l.watch.enabled {
+                if let Some(t) = dirty.get(&l.id) {
+                    let remaining = (debounce_secs as f64 - (now - t)).max(0.5);
+                    soonest = soonest.min(remaining);
+                }
+            }
+        }
+    }
+    Duration::from_secs_f64(soonest.clamp(0.5, SUPERVISOR_TICK_SECS as f64))
 }
 
 /// One supervisor pass. Pure decisions live in `core::schedule`; this only does the
@@ -1256,7 +1318,9 @@ fn maintain_fs_watch(state: &AppState, libs: &[SavedLibrary]) {
         *guard = if pairs.is_empty() {
             None
         } else {
-            fswatch::start(&pairs, Arc::clone(&state.fs_dirty))
+            let waker = Arc::clone(&state.wake);
+            let on_change: fswatch::OnChange = Arc::new(move || waker.notify());
+            fswatch::start(&pairs, Arc::clone(&state.fs_dirty), on_change)
         };
     }
     if pairs.is_empty() {
