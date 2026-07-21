@@ -13,6 +13,7 @@ pub mod encode;
 pub mod encoders;
 pub mod estimate;
 pub mod ffbin;
+pub mod fswatch;
 pub mod health;
 pub mod hwcaps;
 pub mod idle;

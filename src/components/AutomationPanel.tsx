@@ -16,6 +16,26 @@ function whenNext(next: number | null): string {
   return `in ${Math.round(diff / 86400)}d`;
 }
 
+/** The schedule line for one watched library, accounting for on-change and the
+ *  idle gate (a due-but-idle-gated library is waiting for you to step away). */
+function scheduleLabel(
+  entry: AutomationStatus["entries"][number],
+  enabled: boolean,
+  systemIdle: boolean,
+): string {
+  if (!enabled) return "paused (automation off)";
+  if (entry.trigger_kind === "onchange") {
+    return entry.idle_only && !systemIdle
+      ? "on file change (when away)"
+      : "watching for changes";
+  }
+  const due =
+    entry.next_run_at != null && entry.next_run_at - Date.now() / 1000 <= 60;
+  if (due && entry.idle_only && !systemIdle)
+    return "due — waiting until you're away";
+  return `next ${whenNext(entry.next_run_at)}`;
+}
+
 /**
  * The Dashboard's automation surface: the global master switch plus every watched
  * library's next/last unattended run, with a per-library "Run now". Watched
@@ -55,9 +75,12 @@ export function AutomationPanel() {
   };
 
   return (
-    <div className="card card-flat">
+    <div className="card card-flat card-glow">
       <div className="card-head">
-        <div className="card-title">
+        <div
+          className="card-title"
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
           <WatchIcon size={15} /> Automation
         </div>
         {!locked && (
@@ -88,9 +111,7 @@ export function AutomationPanel() {
               <div className="lib-row-main">
                 <span className="lib-name">{e.name}</span>
                 <span className="muted lib-meta">
-                  {status.enabled
-                    ? `next ${whenNext(e.next_run_at)}`
-                    : "paused (automation off)"}
+                  {scheduleLabel(e, status.enabled, status.system_idle)}
                   {e.last_auto_run_at
                     ? ` · last ran ${relativeTime(e.last_auto_run_at)}`
                     : ""}

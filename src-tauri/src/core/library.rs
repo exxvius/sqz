@@ -22,6 +22,11 @@ use super::config::{Config, OnSuccess};
 /// "every 1 minute" can't turn unattended mode into a busy loop.
 pub const MIN_INTERVAL_MINS: u64 = 15;
 
+/// Smallest debounce (seconds) an `OnChange` trigger settles for after the last
+/// filesystem event before it fires — long enough that a burst of writes (a large
+/// copy, a download finishing) collapses into one run.
+pub const MIN_DEBOUNCE_SECS: u64 = 5;
+
 /// When a watched library fires an unattended run.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -30,6 +35,9 @@ pub enum Trigger {
     Interval { every_mins: u64 },
     /// Re-run once per calendar day at a local wall-clock time.
     Daily { hour: u8, minute: u8 },
+    /// Re-run shortly after files change under the library's roots (filesystem
+    /// events), once activity settles for `debounce_secs` (≥ [`MIN_DEBOUNCE_SECS`]).
+    OnChange { debounce_secs: u64 },
 }
 
 impl Default for Trigger {
@@ -75,6 +83,9 @@ impl WatchConfig {
                 if *hour > 23 || *minute > 59 {
                     return Err("Daily schedule must be a valid time of day.".into());
                 }
+            }
+            Trigger::OnChange { debounce_secs } => {
+                *debounce_secs = (*debounce_secs).max(MIN_DEBOUNCE_SECS);
             }
         }
         Ok(self)

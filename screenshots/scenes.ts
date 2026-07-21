@@ -450,16 +450,21 @@ const LIBRARIES = [
 /** Automation status derived from the watched libraries above. */
 const AUTOMATION = {
   enabled: true,
+  system_idle: true,
   entries: [
     {
       library_id: "lib-movies",
       name: "Movies",
+      trigger_kind: "daily",
+      idle_only: true,
       next_run_at: now + 3600 * 5,
       last_auto_run_at: now - 3600 * 19,
     },
     {
       library_id: "lib-youtube",
       name: "YouTube downloads",
+      trigger_kind: "interval",
+      idle_only: true,
       next_run_at: now + 60 * 40,
       last_auto_run_at: now - 3600 * 2,
     },

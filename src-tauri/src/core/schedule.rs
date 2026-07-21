@@ -10,7 +10,7 @@
 //! real clock and idle signal, calls in here, and launches at most one due run per
 //! tick through the ordinary run path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use chrono::{DateTime, Local, Timelike};
@@ -101,7 +101,9 @@ fn daily_trigger_today(now: DateTime<Local>, hour: u8, minute: u8) -> DateTime<L
         .unwrap_or(now)
 }
 
-/// Is a single trigger due at `now`, given its last auto-run (unix seconds)?
+/// Is a *time-based* trigger due at `now`, given its last auto-run (unix seconds)?
+/// `OnChange` is never time-due — the supervisor gates it on filesystem events
+/// via `fs_ready` instead — so it returns false here.
 fn is_due(trigger: Trigger, last_run: Option<f64>, now: DateTime<Local>) -> bool {
     let now_secs = now.timestamp() as f64;
     match trigger {
@@ -123,23 +125,31 @@ fn is_due(trigger: Trigger, last_run: Option<f64>, now: DateTime<Local>) -> bool
                 Some(prev) => (prev as i64) < trigger_today.timestamp(),
             }
         }
+        // Filesystem-driven, not time-driven.
+        Trigger::OnChange { .. } => false,
     }
 }
 
 /// Which watched libraries should start an unattended run at `now`, oldest-due
 /// first (a library that has never auto-run sorts first). A library whose
-/// `idle_only` is set is suppressed while `system_idle` is false. Pure.
+/// `idle_only` is set is suppressed while `system_idle` is false. `OnChange`
+/// libraries are due only when their id is in `fs_ready` (their filesystem
+/// debounce has settled — the supervisor computes that). Pure.
 pub fn due_libraries(
     libs: &[SavedLibrary],
     state: &WatchState,
     now: DateTime<Local>,
     system_idle: bool,
+    fs_ready: &HashSet<String>,
 ) -> Vec<Due> {
     let mut due: Vec<Due> = libs
         .iter()
         .filter(|l| l.watch.enabled)
         .filter(|l| !l.watch.idle_only || system_idle)
-        .filter(|l| is_due(l.watch.trigger, state.last(&l.id), now))
+        .filter(|l| match l.watch.trigger {
+            Trigger::OnChange { .. } => fs_ready.contains(&l.id),
+            time_trigger => is_due(time_trigger, state.last(&l.id), now),
+        })
         .map(|l| Due {
             library_id: l.id.clone(),
             last_run: state.last(&l.id),
@@ -176,6 +186,8 @@ pub fn next_run_at(trigger: Trigger, last_run: Option<f64>, now: DateTime<Local>
                 today.timestamp() as f64 + 24.0 * 3600.0
             }
         }
+        // OnChange has no scheduled instant; callers show it as event-driven.
+        Trigger::OnChange { .. } => now_secs,
     }
 }
 
@@ -218,10 +230,15 @@ mod tests {
             .unwrap()
     }
 
+    /// No filesystem-ready libraries (time-trigger tests don't use OnChange).
+    fn no_fs() -> HashSet<String> {
+        HashSet::new()
+    }
+
     #[test]
     fn interval_is_due_when_never_run() {
         let libs = vec![watched("a", Trigger::Interval { every_mins: 60 }, false)];
-        let due = due_libraries(&libs, &WatchState::default(), at(12, 0), true);
+        let due = due_libraries(&libs, &WatchState::default(), at(12, 0), true, &no_fs());
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].library_id, "a");
     }
@@ -233,20 +250,20 @@ mod tests {
         let mut state = WatchState::default();
         // Ran 30 min ago — not yet due.
         state.mark("a", now.timestamp() as f64 - 30.0 * 60.0);
-        assert!(due_libraries(&libs, &state, now, true).is_empty());
+        assert!(due_libraries(&libs, &state, now, true, &no_fs()).is_empty());
         // Ran 90 min ago — due.
         state.mark("a", now.timestamp() as f64 - 90.0 * 60.0);
-        assert_eq!(due_libraries(&libs, &state, now, true).len(), 1);
+        assert_eq!(due_libraries(&libs, &state, now, true, &no_fs()).len(), 1);
     }
 
     #[test]
     fn daily_fires_once_past_its_time_and_not_before() {
         let libs = vec![watched("a", Trigger::Daily { hour: 3, minute: 0 }, false)];
         // 02:00 — before the 03:00 trigger.
-        assert!(due_libraries(&libs, &WatchState::default(), at(2, 0), true).is_empty());
+        assert!(due_libraries(&libs, &WatchState::default(), at(2, 0), true, &no_fs()).is_empty());
         // 04:00 — past it, never run → due.
         assert_eq!(
-            due_libraries(&libs, &WatchState::default(), at(4, 0), true).len(),
+            due_libraries(&libs, &WatchState::default(), at(4, 0), true, &no_fs()).len(),
             1
         );
     }
@@ -258,7 +275,7 @@ mod tests {
         let mut state = WatchState::default();
         // Already ran at 03:30 today — not due again.
         state.mark("a", at(3, 30).timestamp() as f64);
-        assert!(due_libraries(&libs, &state, now, true).is_empty());
+        assert!(due_libraries(&libs, &state, now, true, &no_fs()).is_empty());
     }
 
     #[test]
@@ -268,17 +285,19 @@ mod tests {
         let mut state = WatchState::default();
         // Last ran a full day ago — the app was closed over today's trigger → due.
         state.mark("a", now.timestamp() as f64 - 24.0 * 3600.0);
-        assert_eq!(due_libraries(&libs, &state, now, true).len(), 1);
+        assert_eq!(due_libraries(&libs, &state, now, true, &no_fs()).len(), 1);
     }
 
     #[test]
     fn idle_only_is_suppressed_when_not_idle() {
         let libs = vec![watched("a", Trigger::Interval { every_mins: 60 }, true)];
         // Due by schedule, but the machine is busy → held back.
-        assert!(due_libraries(&libs, &WatchState::default(), at(12, 0), false).is_empty());
+        assert!(
+            due_libraries(&libs, &WatchState::default(), at(12, 0), false, &no_fs()).is_empty()
+        );
         // Same schedule, machine idle → due.
         assert_eq!(
-            due_libraries(&libs, &WatchState::default(), at(12, 0), true).len(),
+            due_libraries(&libs, &WatchState::default(), at(12, 0), true, &no_fs()).len(),
             1
         );
     }
@@ -287,7 +306,9 @@ mod tests {
     fn disabled_libraries_are_never_due() {
         let mut lib = watched("a", Trigger::Interval { every_mins: 60 }, false);
         lib.watch.enabled = false;
-        assert!(due_libraries(&[lib], &WatchState::default(), at(12, 0), true).is_empty());
+        assert!(
+            due_libraries(&[lib], &WatchState::default(), at(12, 0), true, &no_fs()).is_empty()
+        );
     }
 
     #[test]
@@ -302,9 +323,22 @@ mod tests {
         state.mark("recent", now.timestamp() as f64 - 2.0 * 3600.0);
         state.mark("old", now.timestamp() as f64 - 10.0 * 3600.0);
         // "never" has no entry.
-        let due = due_libraries(&libs, &state, now, true);
+        let due = due_libraries(&libs, &state, now, true, &no_fs());
         let order: Vec<&str> = due.iter().map(|d| d.library_id.as_str()).collect();
         assert_eq!(order, vec!["never", "old", "recent"]);
+    }
+
+    #[test]
+    fn onchange_is_due_only_when_filesystem_ready() {
+        let libs = vec![watched("a", Trigger::OnChange { debounce_secs: 30 }, false)];
+        // No filesystem activity settled yet → not due, regardless of the clock.
+        assert!(due_libraries(&libs, &WatchState::default(), at(12, 0), true, &no_fs()).is_empty());
+        // Its id is filesystem-ready → due.
+        let ready: HashSet<String> = ["a".to_string()].into_iter().collect();
+        assert_eq!(
+            due_libraries(&libs, &WatchState::default(), at(12, 0), true, &ready).len(),
+            1
+        );
     }
 
     #[test]

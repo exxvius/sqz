@@ -195,7 +195,8 @@ export interface Library {
 /** When a watched library fires an unattended run. */
 export type Trigger =
   | { kind: "interval"; every_mins: number }
-  | { kind: "daily"; hour: number; minute: number };
+  | { kind: "daily"; hour: number; minute: number }
+  | { kind: "onchange"; debounce_secs: number };
 
 /** Per-library unattended-run configuration. */
 export interface WatchConfig {
@@ -208,6 +209,9 @@ export interface WatchConfig {
 
 /** Smallest interval (minutes) an interval trigger may fire on (mirrors Rust). */
 export const MIN_INTERVAL_MINS = 15;
+
+/** Smallest settle time (seconds) an on-change trigger debounces (mirrors Rust). */
+export const MIN_DEBOUNCE_SECS = 5;
 
 /** The default watch config for a newly-watched library (mirrors Rust defaults). */
 export function defaultWatch(): WatchConfig {
@@ -238,7 +242,12 @@ export interface SavedLibrary {
 export interface AutomationEntry {
   library_id: string;
   name: string;
-  /** Unix seconds of the next scheduled fire (a due schedule reads as "now"). */
+  /** "interval" | "daily" | "onchange" — how this library is triggered. */
+  trigger_kind: "interval" | "daily" | "onchange";
+  /** Whether it only runs while the machine is idle. */
+  idle_only: boolean;
+  /** Unix seconds of the next scheduled fire (a due schedule reads as "now").
+   *  null for on-change (event-driven, not scheduled). */
   next_run_at: number | null;
   /** Unix seconds of the last auto-run, if it has ever fired. */
   last_auto_run_at: number | null;
@@ -247,6 +256,8 @@ export interface AutomationEntry {
 /** Global automation status: the master switch + every watched library. */
 export interface AutomationStatus {
   enabled: boolean;
+  /** Whether the machine is currently input-idle. */
+  system_idle: boolean;
   entries: AutomationEntry[];
 }
 

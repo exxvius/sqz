@@ -46,6 +46,8 @@ walkdir = "2"
 # Local wall-clock conversion for Daily unattended schedules (already in the tree
 # via iana-time-zone; the `clock` default feature gives us `Local`).
 chrono = "0.4"
+# Filesystem-event watching for the "on change" unattended trigger.
+notify = "6"
 
 # Linux ffmpeg builds ship as .tar.xz; other platforms use zip.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]

@@ -1,7 +1,7 @@
 //! Tauri command surface + shared app state. Commands are thin: they validate,
 //! offload engine work to a blocking thread, and steer the active run.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,9 +16,10 @@ use crate::core::discover::discover;
 use crate::core::encoders::{self, Detection};
 use crate::core::estimate::{self, ProbedFile, ReclaimProjection};
 use crate::core::ffbin::FfBin;
+use crate::core::fswatch::{self, FsWatch};
 use crate::core::health::{classify, HealthState};
 use crate::core::idle;
-use crate::core::library::{self, SavedLibrary};
+use crate::core::library::{self, SavedLibrary, Trigger};
 use crate::core::lock::Lock;
 use crate::core::manifest::{mtime_secs, HistoryQuery, HistoryRow, LibraryRow, Manifest};
 use crate::core::probe::{probe, probe_many};
@@ -57,6 +58,11 @@ pub struct AppState {
     /// Library id of an in-flight *unattended* run (`None` for manual/idle). Lets
     /// the supervisor know which run it owns and whose `idle_only` to honor.
     pub automation_active: Mutex<Option<String>>,
+    /// Filesystem-event dirtiness for `OnChange` libraries (library id → unix secs
+    /// of the last event), stamped by the watcher and consumed by the supervisor.
+    pub fs_dirty: fswatch::DirtyMap,
+    /// The live filesystem watcher, rebuilt when the watched root set changes.
+    pub fs_watch: Mutex<Option<FsWatch>>,
     /// Password-gated lock: masks personal info and makes the app read-only.
     pub lock: Lock,
 }
@@ -74,6 +80,8 @@ impl AppState {
             projection: Mutex::new(None),
             health: Mutex::new(None),
             automation_active: Mutex::new(None),
+            fs_dirty: Arc::new(Mutex::new(HashMap::new())),
+            fs_watch: Mutex::new(None),
             lock,
         }
     }
@@ -1030,7 +1038,13 @@ pub fn delete_library(id: String, state: State<'_, AppState>) -> Result<(), Stri
 pub struct AutomationEntry {
     pub library_id: String,
     pub name: String,
+    /// "interval" | "daily" | "onchange" — how this library is triggered.
+    pub trigger_kind: String,
+    /// Whether the library only runs while the machine is idle (so the UI can say
+    /// "waiting until you're away" when it's due but the machine is active).
+    pub idle_only: bool,
     /// Unix seconds of the next scheduled fire (a due schedule reads as "now").
+    /// `None` for `OnChange` — it's event-driven, not scheduled.
     pub next_run_at: Option<f64>,
     /// Unix seconds of the last auto-run, if it has ever fired.
     pub last_auto_run_at: Option<f64>,
@@ -1040,8 +1054,19 @@ pub struct AutomationEntry {
 pub struct AutomationStatus {
     /// The global master switch.
     pub enabled: bool,
+    /// Whether the machine is currently input-idle (so the UI can explain an
+    /// idle-gated library that's due but held back).
+    pub system_idle: bool,
     /// Watched libraries, each with its next/last unattended-run times.
     pub entries: Vec<AutomationEntry>,
+}
+
+fn trigger_kind(t: Trigger) -> &'static str {
+    match t {
+        Trigger::Interval { .. } => "interval",
+        Trigger::Daily { .. } => "daily",
+        Trigger::OnChange { .. } => "onchange",
+    }
 }
 
 /// Automation status for the Dashboard: the master switch plus every watched
@@ -1050,6 +1075,7 @@ pub struct AutomationStatus {
 #[tauri::command]
 pub fn get_automation(state: State<'_, AppState>) -> AutomationStatus {
     let enabled = schedule::load_automation(&state.automation_path()).enabled;
+    let system_idle = idle::is_idle(idle::DEFAULT_IDLE_SECS);
     let libs = library::load_all(&state.libraries_path());
     let watch = schedule::load_state(&state.watch_state_path());
     let now = chrono::Local::now();
@@ -1058,15 +1084,26 @@ pub fn get_automation(state: State<'_, AppState>) -> AutomationStatus {
         .filter(|l| l.watch.enabled)
         .map(|l| {
             let last = watch.last(&l.id);
+            // OnChange has no scheduled instant; leave next_run_at empty.
+            let next_run_at = match l.watch.trigger {
+                Trigger::OnChange { .. } => None,
+                t => Some(schedule::next_run_at(t, last, now)),
+            };
             AutomationEntry {
                 library_id: l.id.clone(),
                 name: l.name.clone(),
-                next_run_at: Some(schedule::next_run_at(l.watch.trigger, last, now)),
+                trigger_kind: trigger_kind(l.watch.trigger).to_string(),
+                idle_only: l.watch.idle_only,
+                next_run_at,
                 last_auto_run_at: last,
             }
         })
         .collect();
-    AutomationStatus { enabled, entries }
+    AutomationStatus {
+        enabled,
+        system_idle,
+        entries,
+    }
 }
 
 /// Flip the global automation master switch. Off pauses all watching without
@@ -1093,6 +1130,12 @@ pub fn run_library_now(
     let mut cfg = lib.profile.clone();
     cfg.inputs = lib.roots.clone();
     let cfg = finalize_config(&state, cfg)?;
+    // Running now resets the schedule so the panel shows the next fire (not a
+    // stuck "due now") and an idle-gated library won't immediately re-fire.
+    let mut watch = schedule::load_state(&state.watch_state_path());
+    watch.mark(&id, chrono::Local::now().timestamp() as f64);
+    let _ = schedule::save_state(&state.watch_state_path(), &watch);
+    state.fs_dirty.lock().unwrap().remove(&id);
     *state.last_config.lock().unwrap() = Some(cfg.clone());
     launch_run(app, cfg, &state, RunSource::Manual)
 }
@@ -1152,11 +1195,15 @@ fn supervisor_tick(app: &AppHandle) {
         return;
     }
 
-    // 3. Launch at most one due library, oldest-due first.
+    // 3. Maintain the filesystem watcher for OnChange libraries, then launch at
+    //    most one due library (time- or event-triggered), oldest-due first.
     let libs = library::load_all(&state.libraries_path());
+    maintain_fs_watch(&state, &libs);
+    let fs_ready = fs_ready_set(&state, &libs);
+
     let mut watch = schedule::load_state(&state.watch_state_path());
     let now = chrono::Local::now();
-    let due = schedule::due_libraries(&libs, &watch, now, system_idle);
+    let due = schedule::due_libraries(&libs, &watch, now, system_idle, &fs_ready);
     let Some(first) = due.first() else {
         return;
     };
@@ -1173,15 +1220,64 @@ fn supervisor_tick(app: &AppHandle) {
             return;
         }
     };
-    // Mark before launching so a crash mid-run can't re-fire instantly on restart.
+    // Mark before launching so a crash mid-run can't re-fire instantly on restart,
+    // and clear its filesystem dirtiness so a settled OnChange doesn't re-fire.
     watch.mark(&lib.id, now.timestamp() as f64);
     let _ = schedule::save_state(&state.watch_state_path(), &watch);
+    state.fs_dirty.lock().unwrap().remove(&lib.id);
 
     let source = RunSource::Unattended {
         id: lib.id.clone(),
         name: lib.name.clone(),
     };
     let _ = launch_run(app.clone(), cfg, &state, source);
+}
+
+/// The `(id, roots)` pairs of enabled `OnChange` libraries — what the filesystem
+/// watcher covers.
+fn onchange_libs(libs: &[SavedLibrary]) -> Vec<(String, Vec<PathBuf>)> {
+    libs.iter()
+        .filter(|l| l.watch.enabled && matches!(l.watch.trigger, Trigger::OnChange { .. }))
+        .map(|l| (l.id.clone(), l.roots.clone()))
+        .collect()
+}
+
+/// Rebuild the filesystem watcher whenever the set of watched `OnChange` roots
+/// changes; drop stale dirtiness when nothing is watched anymore.
+fn maintain_fs_watch(state: &AppState, libs: &[SavedLibrary]) {
+    let pairs = onchange_libs(libs);
+    let want = fswatch::signature_of(&pairs);
+    let mut guard = state.fs_watch.lock().unwrap();
+    let cur = guard
+        .as_ref()
+        .map(|w| w.signature.clone())
+        .unwrap_or_default();
+    if cur != want {
+        *guard = if pairs.is_empty() {
+            None
+        } else {
+            fswatch::start(&pairs, Arc::clone(&state.fs_dirty))
+        };
+    }
+    if pairs.is_empty() {
+        state.fs_dirty.lock().unwrap().clear();
+    }
+}
+
+/// The enabled `OnChange` libraries whose filesystem activity has settled past
+/// their debounce — the set the scheduler treats as event-due.
+fn fs_ready_set(state: &AppState, libs: &[SavedLibrary]) -> HashSet<String> {
+    let now = chrono::Local::now().timestamp() as f64;
+    let dirty = state.fs_dirty.lock().unwrap();
+    libs.iter()
+        .filter_map(|l| match l.watch.trigger {
+            Trigger::OnChange { debounce_secs } if l.watch.enabled => dirty
+                .get(&l.id)
+                .filter(|&&t| now - t >= debounce_secs as f64)
+                .map(|_| l.id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[tauri::command]

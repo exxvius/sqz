@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { AddFolderIcon, RemoveXIcon } from "./icons";
 import { pickInputs } from "../lib/api";
-import { defaultWatch, MIN_INTERVAL_MINS } from "../lib/types";
+import {
+  defaultWatch,
+  MIN_DEBOUNCE_SECS,
+  MIN_INTERVAL_MINS,
+} from "../lib/types";
 import type { RunConfig, SavedLibrary, WatchConfig } from "../lib/types";
 import { AdvancedOptions } from "./AdvancedOptions";
 import { Collapsible } from "./Collapsible";
@@ -37,13 +41,15 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
     setWatch((w) => ({ ...w, ...p }));
 
   const trigger = watch.trigger;
-  const setKind = (kind: "daily" | "interval") => {
+  const setKind = (kind: "daily" | "interval" | "onchange") => {
     if (kind === trigger.kind) return;
     patchWatch({
       trigger:
         kind === "daily"
           ? { kind: "daily", hour: 3, minute: 0 }
-          : { kind: "interval", every_mins: 60 },
+          : kind === "interval"
+            ? { kind: "interval", every_mins: 60 }
+            : { kind: "onchange", debounce_secs: 30 },
     });
   };
   const onTime = (v: string) => {
@@ -180,13 +186,14 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
 
               <div className="field">
                 <label>
-                  Schedule
+                  Trigger
                   <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                    Only new or changed files are re-encoded — an unchanged
-                    library is a no-op.
+                    <strong>Daily / Interval</strong> rescans on a timer;{" "}
+                    <strong>On change</strong> reacts to filesystem events.
+                    Either way only new or changed files are re-encoded.
                   </div>
                 </label>
-                <div className="seg" role="group" aria-label="Schedule type">
+                <div className="seg" role="group" aria-label="Trigger type">
                   <button
                     aria-pressed={trigger.kind === "daily"}
                     onClick={() => setKind("daily")}
@@ -199,10 +206,58 @@ export function LibraryEditor({ initial, onSave, onClose }: Props) {
                   >
                     Interval
                   </button>
+                  <button
+                    aria-pressed={trigger.kind === "onchange"}
+                    onClick={() => setKind("onchange")}
+                  >
+                    On change
+                  </button>
                 </div>
               </div>
 
-              {trigger.kind === "daily" ? (
+              {trigger.kind === "onchange" ? (
+                <div className="field">
+                  <label>
+                    Settle time (seconds)
+                    <div
+                      className="muted"
+                      style={{ fontSize: "var(--text-xs)" }}
+                    >
+                      Wait this long after the last change before running, so a
+                      big copy or download collapses into one run. Minimum{" "}
+                      {MIN_DEBOUNCE_SECS}.
+                    </div>
+                  </label>
+                  <input
+                    type="number"
+                    min={MIN_DEBOUNCE_SECS}
+                    className="search"
+                    style={{ maxWidth: 140 }}
+                    value={trigger.debounce_secs}
+                    onChange={(e) =>
+                      patchWatch({
+                        trigger: {
+                          kind: "onchange",
+                          debounce_secs: Number(e.target.value) || 0,
+                        },
+                      })
+                    }
+                    onBlur={() =>
+                      patchWatch({
+                        trigger: {
+                          kind: "onchange",
+                          debounce_secs: Math.max(
+                            MIN_DEBOUNCE_SECS,
+                            trigger.kind === "onchange"
+                              ? trigger.debounce_secs
+                              : 30,
+                          ),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              ) : trigger.kind === "daily" ? (
                 <div className="field">
                   <label>
                     Time of day
