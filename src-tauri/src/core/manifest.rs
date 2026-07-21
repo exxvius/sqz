@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS files (
     out_ext           TEXT,
     cur_codec         TEXT,
     cur_height        INTEGER,
-    orig_path         TEXT
+    orig_path         TEXT,
+    held_path         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -86,6 +87,9 @@ pub struct StatusUpdate {
     /// The original source path when a Holding-mode encode moved the original
     /// aside (so the row can be restored). `None` otherwise.
     pub orig_path: Option<String>,
+    /// The actual path the original was moved to inside the holding folder
+    /// (numbered on collision). `None` unless Holding-mode.
+    pub held_path: Option<String>,
 }
 
 /// One raw history aggregate per `(codec, height)` group:
@@ -202,6 +206,10 @@ impl Manifest {
         // so the row (now keyed by the output) can be undone. NULL when there's
         // nothing to restore (recycle/delete/keep-both, or never encoded).
         let _ = conn.execute("ALTER TABLE files ADD COLUMN orig_path TEXT", []);
+        // The actual path the original was moved to in the holding folder (its name
+        // may carry a numbered suffix from a collision); restore moves it back to
+        // `orig_path`. NULL unless Holding-mode.
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN held_path TEXT", []);
         // The "warning" (playback-caveat) health verdict was dropped; those files
         // probed fine, so fold any legacy rows back into "healthy".
         let _ = conn.execute(
@@ -265,7 +273,7 @@ impl Manifest {
             "UPDATE files SET status=?1, src_codec=COALESCE(?2, src_codec), \
              height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, \
              encode_ms=COALESCE(?7, encode_ms), fallback=?8, out_ext=?9, \
-             orig_path=?10, updated_at=?11 WHERE path=?12",
+             orig_path=?10, held_path=?11, updated_at=?12 WHERE path=?13",
             params![
                 status,
                 upd.src_codec,
@@ -277,6 +285,7 @@ impl Manifest {
                 upd.fallback,
                 upd.out_ext,
                 upd.orig_path,
+                upd.held_path,
                 now(),
                 path,
             ],
@@ -678,17 +687,22 @@ impl Manifest {
         Ok(())
     }
 
-    /// The restorable original's source path for a row (set only for Holding-mode
-    /// encodes), or `None` if the row has nothing to restore.
-    pub fn orig_path(&self, path: &str) -> Option<String> {
+    /// For a restorable (Holding-mode) row, the `(held_path, orig_path)` pair:
+    /// where the original file sits now, and where to move it back to. `None` if
+    /// the row has nothing to restore.
+    pub fn restore_paths(&self, path: &str) -> Option<(String, String)> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT orig_path FROM files WHERE path=?1",
-            params![path],
-            |r| r.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten()
+        let row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT held_path, orig_path FROM files WHERE path=?1",
+                params![path],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        match row {
+            Some((Some(held), Some(orig))) => Some((held, orig)),
+            _ => None,
+        }
     }
 
     /// Delete one row from the manifest.

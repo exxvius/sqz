@@ -29,6 +29,15 @@ fn err(msg: impl Into<String>) -> ReplaceError {
     ReplaceError::Msg(msg.into())
 }
 
+/// The result of a swap: where the encoded output landed, and — for Holding mode
+/// only — where the original was actually moved (numbered on collision), so a
+/// later restore can move it back to its original name.
+#[derive(Debug, Clone)]
+pub struct ReplaceOutcome {
+    pub final_path: PathBuf,
+    pub held_path: Option<PathBuf>,
+}
+
 /// Same-volume atomic rename.
 fn place(encoded: &Path, final_path: &Path) -> std::io::Result<()> {
     std::fs::rename(encoded, final_path)
@@ -78,7 +87,11 @@ fn restore_times(final_path: &Path, atime: FileTime, mtime: FileTime) {
 
 /// Swap `encoded` in for `src`. Returns the final path (extension = the run's
 /// output container).
-pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<PathBuf, ReplaceError> {
+pub fn replace_original(
+    cfg: &Config,
+    src: &Path,
+    encoded: &Path,
+) -> Result<ReplaceOutcome, ReplaceError> {
     let final_path = src.with_extension(cfg.container.ext());
     let meta = std::fs::metadata(src)?;
     let atime = FileTime::from_last_access_time(&meta);
@@ -91,7 +104,10 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
         let copy = free_numbered_path(&final_path);
         place(encoded, &copy).map_err(|e| err(format!("failed to place encoded copy: {e}")))?;
         restore_times(&copy, atime, mtime);
-        return Ok(copy);
+        return Ok(ReplaceOutcome {
+            final_path: copy,
+            held_path: None,
+        });
     }
 
     // Guard against clobbering an unrelated file: when the source isn't already
@@ -105,6 +121,7 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
         )));
     }
 
+    let mut held_path: Option<PathBuf> = None;
     match cfg.on_success {
         OnSuccess::Recycle => {
             if final_path == *src {
@@ -129,15 +146,19 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
             }
         }
         OnSuccess::Holding => {
-            let dest = holding_path_for(src, cfg);
-            if let Some(parent) = dest.parent() {
+            // Flat: the original keeps its filename inside the holding folder, with
+            // a numbered suffix only if another held original already has that name.
+            let base = holding_path_for(src, cfg);
+            if let Some(parent) = base.parent() {
                 std::fs::create_dir_all(parent)?;
             }
+            let dest = free_numbered_path(&base);
             move_path(src, &dest)?;
             if let Err(e) = place(encoded, &final_path) {
                 let _ = move_path(&dest, src); // restore
                 return Err(err(format!("failed to place encoded file: {e}")));
             }
+            held_path = Some(dest);
         }
         OnSuccess::Delete => {
             let stash = src.with_file_name(format!(
@@ -158,7 +179,10 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
     }
 
     restore_times(&final_path, atime, mtime);
-    Ok(final_path)
+    Ok(ReplaceOutcome {
+        final_path,
+        held_path,
+    })
 }
 
 /// Suffix Delete-mode uses to stash an original during the swap window.
@@ -281,7 +305,7 @@ mod tests {
             on_success: OnSuccess::Delete,
             ..Config::default()
         };
-        let final_path = replace_original(&cfg, &src, &enc).unwrap();
+        let final_path = replace_original(&cfg, &src, &enc).unwrap().final_path;
         assert_eq!(final_path, d.join("clip.mkv"));
         assert!(final_path.exists());
         assert!(!src.exists());
@@ -415,15 +439,14 @@ mod tests {
             holding_dir: Some(holding.clone()),
             ..Config::default()
         };
-        let final_path = replace_original(&cfg, &src, &enc).unwrap();
-        assert!(final_path.exists());
-        assert_eq!(std::fs::read(&final_path).unwrap(), b"x");
-        // Original still recoverable somewhere under the holding dir.
-        let found = walkdir::WalkDir::new(&holding)
-            .into_iter()
-            .filter_map(Result::ok)
-            .any(|e| e.file_type().is_file());
-        assert!(found);
+        let outcome = replace_original(&cfg, &src, &enc).unwrap();
+        assert!(outcome.final_path.exists());
+        assert_eq!(std::fs::read(&outcome.final_path).unwrap(), b"x");
+        // The original is held flat in the holding folder under its own name, and
+        // the reported held path points right at it.
+        let held = outcome.held_path.expect("holding mode reports a held path");
+        assert_eq!(held, holding.join("clip.mkv"));
+        assert_eq!(std::fs::read(&held).unwrap(), b"original-bytes-here");
 
         let _ = std::fs::remove_dir_all(&d);
     }

@@ -20,7 +20,6 @@ use crate::core::health::{classify, HealthState};
 use crate::core::library::{self, SavedLibrary};
 use crate::core::lock::Lock;
 use crate::core::manifest::{mtime_secs, HistoryQuery, HistoryRow, LibraryRow, Manifest};
-use crate::core::paths::holding_path_for;
 use crate::core::probe::{probe, probe_many};
 use crate::core::util::command_no_window;
 use crate::events::{
@@ -976,16 +975,6 @@ pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Holding dir the user configured (from persisted settings), or the default.
-fn configured_holding_dir(state: &AppState) -> PathBuf {
-    let settings = read_settings(state);
-    settings
-        .get("holding_dir")
-        .and_then(|v| v.as_str())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.data_dir.join(HOLDING_DIRNAME))
-}
-
 fn read_settings(state: &AppState) -> serde_json::Value {
     std::fs::read_to_string(state.settings_path())
         .ok()
@@ -1005,29 +994,24 @@ fn move_across(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<
 }
 
 /// Undo a re-encode by restoring the original from the holding folder: the encoded
-/// file is sent to the Recycle Bin (recoverable), the original is moved back into
-/// place, and the manifest row is dropped. Only rows whose original was preserved
-/// via Holding mode carry an `orig_path`, so only those can be restored here.
+/// file is sent to the Recycle Bin (recoverable), the held original is moved back
+/// to its original name/location, and the manifest row is dropped. Only Holding-mode
+/// rows carry the held/original paths, so only those can be restored here.
 #[tauri::command]
 pub async fn restore_original(path: String, state: State<'_, AppState>) -> Result<(), String> {
     guard_locked(&state)?;
-    let holding = configured_holding_dir(&state);
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
         let m = Manifest::open(&db).map_err(|e| e.to_string())?;
-        // The row (keyed by the encoded output) records the original's source path
-        // only for Holding-mode encodes — the one restorable case.
-        let orig = m.orig_path(&path).ok_or_else(|| {
+        // (held_path, orig_path): where the original sits now, and where it came
+        // from. Recorded only for Holding-mode encodes — the one restorable case.
+        let (held, orig) = m.restore_paths(&path).ok_or_else(|| {
             "This file's original wasn't kept in a holding folder, so it can't be restored here."
                 .to_string()
         })?;
+        let held = PathBuf::from(held);
         let orig = PathBuf::from(orig);
-        let cfg = Config {
-            holding_dir: Some(holding),
-            ..Config::default()
-        };
-        let stashed = holding_path_for(&orig, &cfg);
-        if !stashed.exists() {
+        if !held.exists() {
             return Err("Original not found in the holding folder.".to_string());
         }
         if orig.exists() {
@@ -1036,12 +1020,12 @@ pub async fn restore_original(path: String, state: State<'_, AppState>) -> Resul
             );
         }
         // Recycle the encoded file (the row's current path) first (recoverable),
-        // then move the original back into place.
+        // then move the held original back to its original name.
         let encoded = PathBuf::from(&path);
         if encoded.exists() {
             trash::delete(&encoded).map_err(|e| format!("could not recycle encoded file: {e}"))?;
         }
-        move_across(&stashed, &orig).map_err(|e| format!("could not restore original: {e}"))?;
+        move_across(&held, &orig).map_err(|e| format!("could not restore original: {e}"))?;
         // The output row no longer reflects a file on disk; drop it. A future scan
         // or run re-indexes the restored original.
         let _ = m.delete_one(&path);

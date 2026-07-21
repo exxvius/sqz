@@ -176,7 +176,7 @@ fn try_remux(
         return None;
     }
     let final_path = match super::replace::replace_original(cfg, src, &out) {
-        Ok(fp) => fp,
+        Ok(o) => o.final_path,
         Err(_) => {
             cleanup(&out);
             return None;
@@ -723,8 +723,8 @@ pub fn process_file(
             .with_message(format!("verify {:?}", vr.reason));
     }
 
-    let final_path = match super::replace::replace_original(cfg, src, &out) {
-        Ok(p) => p,
+    let swap = match super::replace::replace_original(cfg, src, &out) {
+        Ok(o) => o,
         Err(e) => {
             cleanup(&out);
             set(
@@ -739,6 +739,7 @@ pub fn process_file(
             return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
         }
     };
+    let final_path = swap.final_path;
     // The output's container extension — the source may have had a different one
     // (e.g. .mp4 → .mkv), so the UI resolves the current on-disk file from this.
     let out_ext = final_path
@@ -747,9 +748,11 @@ pub fn process_file(
         .map(|s| s.to_string());
 
     let saved = size as i64 - vr.out_size as i64;
-    // Holding mode moved the original aside — record its source path so the row
-    // (about to be keyed by the output) can be restored later.
-    let orig_path = (cfg.on_success == OnSuccess::Holding).then(|| path_str.to_string());
+    // Holding mode moved the original aside — record its source path (restore
+    // target) and the actual held path (numbered on collision) so the row, about to
+    // be keyed by the output, can be restored back to its original name.
+    let orig_path = swap.held_path.is_some().then(|| path_str.to_string());
+    let held_path = swap.held_path.map(|p| p.to_string_lossy().into_owned());
     set(
         manifest,
         path_str,
@@ -761,6 +764,7 @@ pub fn process_file(
             fallback: fallback_note,
             out_ext: out_ext.clone(),
             orig_path,
+            held_path,
             ..meta_upd(&info)
         },
     );

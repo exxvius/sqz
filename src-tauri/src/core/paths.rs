@@ -133,33 +133,20 @@ pub fn all_temp_dirs(cfg: &Config, sources: &[PathBuf]) -> Vec<PathBuf> {
     dirs
 }
 
-/// Mirror the source under `holding_dir`, preserving volume tag + structure.
+/// Flat destination for a moved original inside `holding_dir`: just the source's
+/// filename, no volume/path mirroring. A same-name collision (two originals from
+/// different folders) is resolved by the caller with a numbered suffix, and the
+/// actual held path is recorded so a restore can move the file back to its
+/// original name.
 pub fn holding_path_for(source: &Path, cfg: &Config) -> PathBuf {
     let holding = cfg
         .holding_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from(HOLDING_DIRNAME));
-    let abs = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
-
-    #[cfg(windows)]
-    {
-        let tag = win_volume(&abs).unwrap_or_else(|| "root".into());
-        let rel: PathBuf = abs
-            .components()
-            .filter(|c| {
-                !matches!(
-                    c,
-                    std::path::Component::Prefix(_) | std::path::Component::RootDir
-                )
-            })
-            .collect();
-        return holding.join(tag).join(rel);
-    }
-    #[cfg(not(windows))]
-    {
-        let rel = abs.strip_prefix("/").unwrap_or(&abs);
-        holding.join(rel)
-    }
+    let name = source
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("original"));
+    holding.join(name)
 }
 
 /// True if `path` lives inside a temp/holding dir we manage (skip on scan).
