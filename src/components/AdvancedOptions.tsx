@@ -143,8 +143,8 @@ export function AdvancedOptions({ config, patch }: Props) {
             <label>
               Holding folder
               <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
-                Originals are moved here (mirrored by volume). Leave as the default app folder or
-                choose your own.
+                Originals are moved here, keeping their filename (a numbered suffix is added if two
+                would collide). Leave as the default app folder or choose your own.
               </div>
             </label>
             <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", width: "100%" }}>
