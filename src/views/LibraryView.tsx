@@ -319,6 +319,20 @@ export function LibraryView({ goDashboard }: Props) {
                 const isScanningThis = scanning && scanningId === lib.id;
                 return (
                   <div className="lib-row" key={lib.id}>
+                    <button
+                      className={`mini-btn watch-toggle${lib.watch.enabled ? " on" : ""}`}
+                      onClick={() => toggleWatch(lib)}
+                      disabled={lib.roots.length === 0}
+                      aria-pressed={lib.watch.enabled}
+                      title={
+                        lib.watch.enabled
+                          ? "Watching — unattended runs on schedule. Click to stop."
+                          : "Watch this library — run unattended on a schedule (set in Edit)."
+                      }
+                      aria-label="Watch this library"
+                    >
+                      <WatchIcon />
+                    </button>
                     <div className="lib-row-main">
                       <span className="lib-name">{lib.name}</span>
                       <span className="muted lib-meta">
@@ -364,20 +378,6 @@ export function LibraryView({ goDashboard }: Props) {
                         </>
                       ) : (
                         <>
-                          <button
-                            className={`mini-btn watch-toggle${lib.watch.enabled ? " on" : ""}`}
-                            onClick={() => toggleWatch(lib)}
-                            disabled={lib.roots.length === 0}
-                            aria-pressed={lib.watch.enabled}
-                            title={
-                              lib.watch.enabled
-                                ? "Watching — unattended runs on schedule. Click to stop."
-                                : "Watch this library — run unattended on a schedule (set in Edit)."
-                            }
-                            aria-label="Watch this library"
-                          >
-                            <WatchIcon />
-                          </button>
                           <button
                             className="mini-btn"
                             onClick={() => runLibrary(lib)}

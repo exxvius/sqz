@@ -1970,18 +1970,19 @@
   );
 }
 
-/* Watch toggle: quiet like any mini-btn when off, glowing accent when watching. */
-.mini-btn.watch-toggle.on {
+/* Watch toggle: quiet like any mini-btn when off; when watching, the button
+   itself fills accent (bg + border) with a white glowing icon. */
+.mini-btn.watch-toggle.on,
+.mini-btn.watch-toggle.on:hover {
   border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-quiet);
-  box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 35%, transparent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px color-mix(in oklab, var(--accent) 55%, transparent);
 }
 .mini-btn.watch-toggle.on svg {
   opacity: 1;
-  filter: drop-shadow(
-    0 0 4px color-mix(in oklab, var(--accent) 55%, transparent)
-  );
+  color: #fff;
+  filter: drop-shadow(0 0 4px color-mix(in oklab, white 70%, transparent));
 }
 
 /* ---- Filter / search bar ---- */
