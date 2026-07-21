@@ -5,7 +5,7 @@ import { LibraryEditor } from "../components/LibraryEditor";
 import {
   DeepScanIcon,
   FolderIcon,
-  LibraryIcon,
+  NewLibraryIcon,
   PlayIcon,
   SearchIcon,
 } from "../components/icons";
@@ -248,7 +248,7 @@ export function LibraryView({ goDashboard }: Props) {
             <h3 style={{ margin: 0, fontSize: "var(--text-lg)" }}>Saved libraries</h3>
             <div className="grow" />
             <button className="mini-btn" onClick={() => setEditing(newLibrary())}>
-              <LibraryIcon /> New library
+              <NewLibraryIcon /> New library
             </button>
           </div>
 
@@ -449,12 +449,12 @@ export function LibraryView({ goDashboard }: Props) {
                       <dd>{r.health_detail}</dd>
                     </>
                   )}
-                  {r.src_codec && (
+                  {(r.cur_codec ?? r.src_codec) && (
                     <>
-                      <dt>source</dt>
+                      <dt>codec</dt>
                       <dd>
-                        {r.src_codec}
-                        {r.height ? ` · ${r.height}p` : ""}
+                        {r.cur_codec ?? r.src_codec}
+                        {(r.cur_height ?? r.height) ? ` · ${r.cur_height ?? r.height}p` : ""}
                       </dd>
                     </>
                   )}

@@ -65,6 +65,12 @@ impl Codec {
         }
     }
 
+    /// Canonical codec name for this target (e.g. "av1"), matching what ffprobe
+    /// reports — used to label the re-encoded output's current codec.
+    pub fn name(self) -> &'static str {
+        self.probe_names()[0]
+    }
+
     /// Balanced base quality (CRF-like, lower = better). Preset offsets apply.
     pub fn base_quality(self) -> i32 {
         match self {
@@ -107,6 +113,9 @@ pub enum OnSuccess {
     /// Permanently delete the original (still verified-first + recoverable
     /// during the swap window).
     Delete,
+    /// Keep both: leave the original untouched and write the encoded copy
+    /// alongside it, with a numbered suffix if the name would collide.
+    Nowhere,
 }
 
 /// Output container. MKV is the safe default (holds anything); MP4 is offered

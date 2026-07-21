@@ -39,6 +39,8 @@ export function outcomeMeta(o: Outcome): StatusMeta {
       return { label: "No gain — kept", sym: <NoGainIcon />, tone: "warn" };
     case "skipped_unhealthy":
       return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
+    case "original_kept":
+      return { label: "Original kept", sym: <NormalizedIcon />, tone: "violet" };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "cancelled":
@@ -62,6 +64,8 @@ export function statusMeta(s: Status): StatusMeta {
       return { label: "No gain — kept", sym: <NoGainIcon />, tone: "warn" };
     case "skipped_unhealthy":
       return { label: "Skipped — unhealthy", sym: <FailIcon />, tone: "warn" };
+    case "original_kept":
+      return { label: "Original kept", sym: <NormalizedIcon />, tone: "violet" };
     case "failed":
       return { label: "Failed", sym: <FailIcon />, tone: "bad" };
     case "processing":
@@ -92,11 +96,12 @@ export function retryable(s: Status): boolean {
   return s === "failed";
 }
 export function forceable(s: Status): boolean {
+  // Only files that weren't actually re-encoded — a skip you can override into a
+  // real encode. A done/normalized file is already processed; forcing it again is
+  // handled via History/Library actions, not this button.
   return (
     s === "skipped_already_efficient" ||
     s === "skipped_marginal" ||
-    s === "skipped_no_gain" ||
-    s === "done" ||
-    s === "normalized"
+    s === "skipped_no_gain"
   );
 }

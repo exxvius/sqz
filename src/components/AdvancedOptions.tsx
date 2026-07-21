@@ -1,6 +1,7 @@
 import { Collapsible } from "./Collapsible";
 import { NumberField, Switch } from "./atoms";
 import { Select } from "./Select";
+import { pickFolder } from "../lib/api";
 import type {
   AudioMode,
   BitDepth,
@@ -14,9 +15,12 @@ import type {
   VerifyDepth,
 } from "../lib/types";
 
+// Ordered least- to most-destructive: keep the original untouched → set it aside →
+// recoverable trash → gone.
 const DISPOSAL: { id: OnSuccess; label: string }[] = [
-  { id: "recycle", label: "Recycle Bin" },
+  { id: "nowhere", label: "Keep both" },
   { id: "holding", label: "Holding folder" },
+  { id: "recycle", label: "Recycle Bin" },
   { id: "delete", label: "Delete" },
 ];
 
@@ -109,7 +113,7 @@ export function AdvancedOptions({ config, patch }: Props) {
   return (
     <>
       <div className="card">
-        <div className="card-title">When a file is replaced, the original goes to…</div>
+        <div className="card-title">After a successful encode, the original…</div>
         <div className="seg" role="group" aria-label="Disposal of originals">
           {DISPOSAL.map((d) => (
             <button
@@ -124,8 +128,44 @@ export function AdvancedOptions({ config, patch }: Props) {
         {config.on_success === "delete" && (
           <p className="muted" style={{ marginTop: "var(--space-3)" }}>
             Originals are permanently deleted — but only after a smaller, verified replacement is in
-            place. Recycle Bin is the safest choice.
+            place. Keep both or Recycle Bin are safer choices.
           </p>
+        )}
+        {config.on_success === "nowhere" && (
+          <p className="muted" style={{ marginTop: "var(--space-3)" }}>
+            The original is left untouched and the encoded copy is written alongside it (a numbered
+            name like “Movie (1).mkv” if they’d collide). Nothing is replaced — you keep both files.
+          </p>
+        )}
+        {config.on_success === "holding" && (
+          <div className="field field-stack" style={{ marginTop: "var(--space-3)" }}>
+            <label>
+              Holding folder
+              <div className="muted" style={{ fontSize: "var(--text-xs)" }}>
+                Originals are moved here (mirrored by volume). Leave as the default app folder or
+                choose your own.
+              </div>
+            </label>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", width: "100%" }}>
+              <span className="path" style={{ flex: 1, minWidth: 0 }} title={config.holding_dir ?? undefined}>
+                {config.holding_dir ?? "Default app folder"}
+              </span>
+              <button
+                className="mini-btn"
+                onClick={async () => {
+                  const f = await pickFolder("Choose holding folder");
+                  if (f) patch({ holding_dir: f });
+                }}
+              >
+                Choose…
+              </button>
+              {config.holding_dir && (
+                <button className="mini-btn" onClick={() => patch({ holding_dir: null })}>
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

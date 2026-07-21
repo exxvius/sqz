@@ -34,6 +34,32 @@ fn place(encoded: &Path, final_path: &Path) -> std::io::Result<()> {
     std::fs::rename(encoded, final_path)
 }
 
+/// A non-colliding variant of `path`: `path` itself when free, else Explorer-style
+/// `name (1).ext`, `name (2).ext`, … Used by keep-both mode so an encoded copy
+/// never overwrites the original it sits beside.
+fn free_numbered_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+    for n in 1..100_000 {
+        let name = match &ext {
+            Some(e) => format!("{stem} ({n}).{e}"),
+            None => format!("{stem} ({n})"),
+        };
+        let cand = parent.join(name);
+        if !cand.exists() {
+            return cand;
+        }
+    }
+    path.to_path_buf() // pathological; caller will surface a place() error
+}
+
 /// Move that tolerates a cross-device target (rename → copy+remove fallback).
 fn move_path(from: &Path, to: &Path) -> std::io::Result<()> {
     match std::fs::rename(from, to) {
@@ -57,6 +83,16 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
     let meta = std::fs::metadata(src)?;
     let atime = FileTime::from_last_access_time(&meta);
     let mtime = FileTime::from_last_modification_time(&meta);
+
+    // Keep-both: the original is never touched. Write the encoded copy alongside
+    // it at a free path (numbered if the name would collide, e.g. the source is
+    // already `.mkv`), and return that copy's path.
+    if let OnSuccess::Nowhere = cfg.on_success {
+        let copy = free_numbered_path(&final_path);
+        place(encoded, &copy).map_err(|e| err(format!("failed to place encoded copy: {e}")))?;
+        restore_times(&copy, atime, mtime);
+        return Ok(copy);
+    }
 
     // Guard against clobbering an unrelated file: when the source isn't already
     // `.mkv`, the final path differs from the source, and an existing file there
@@ -118,6 +154,7 @@ pub fn replace_original(cfg: &Config, src: &Path, encoded: &Path) -> Result<Path
             }
             let _ = std::fs::remove_file(&stash); // committed: drop the original
         }
+        OnSuccess::Nowhere => unreachable!("keep-both handled before the guard"),
     }
 
     restore_times(&final_path, atime, mtime);

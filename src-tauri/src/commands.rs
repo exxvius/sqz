@@ -1004,40 +1004,47 @@ fn move_across(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<
     }
 }
 
-/// Undo a completed re-encode by restoring the original from the holding folder.
-/// The encoded replacement is sent to the Recycle Bin (recoverable), the original
-/// is moved back into place, and the manifest row is cleared. Only works when the
-/// original was preserved via Holding mode.
+/// Undo a re-encode by restoring the original from the holding folder: the encoded
+/// file is sent to the Recycle Bin (recoverable), the original is moved back into
+/// place, and the manifest row is dropped. Only rows whose original was preserved
+/// via Holding mode carry an `orig_path`, so only those can be restored here.
 #[tauri::command]
 pub async fn restore_original(path: String, state: State<'_, AppState>) -> Result<(), String> {
     guard_locked(&state)?;
     let holding = configured_holding_dir(&state);
     let db = state.db_path();
     tauri::async_runtime::spawn_blocking(move || {
-        let orig = PathBuf::from(&path);
-        // The original was mirrored under holding preserving its full name.
+        let m = Manifest::open(&db).map_err(|e| e.to_string())?;
+        // The row (keyed by the encoded output) records the original's source path
+        // only for Holding-mode encodes — the one restorable case.
+        let orig = m.orig_path(&path).ok_or_else(|| {
+            "This file's original wasn't kept in a holding folder, so it can't be restored here."
+                .to_string()
+        })?;
+        let orig = PathBuf::from(orig);
         let cfg = Config {
             holding_dir: Some(holding),
             ..Config::default()
         };
         let stashed = holding_path_for(&orig, &cfg);
         if !stashed.exists() {
-            return Err("Original not found in the holding folder (only Holding-mode runs can be undone here).".to_string());
+            return Err("Original not found in the holding folder.".to_string());
         }
         if orig.exists() {
-            return Err("A file already exists at the original path; not overwriting it.".to_string());
+            return Err(
+                "A file already exists at the original path; not overwriting it.".to_string(),
+            );
         }
-        // Recycle the encoded replacement(s) first (recoverable), then restore.
-        for ext in ["mkv", "mp4"] {
-            let enc = orig.with_extension(ext);
-            if enc != orig && enc.exists() {
-                trash::delete(&enc).map_err(|e| format!("could not recycle encoded file: {e}"))?;
-            }
+        // Recycle the encoded file (the row's current path) first (recoverable),
+        // then move the original back into place.
+        let encoded = PathBuf::from(&path);
+        if encoded.exists() {
+            trash::delete(&encoded).map_err(|e| format!("could not recycle encoded file: {e}"))?;
         }
         move_across(&stashed, &orig).map_err(|e| format!("could not restore original: {e}"))?;
-        if let Ok(m) = Manifest::open(&db) {
-            let _ = m.delete_one(&path);
-        }
+        // The output row no longer reflects a file on disk; drop it. A future scan
+        // or run re-indexes the restored original.
+        let _ = m.delete_one(&path);
         Ok(())
     })
     .await

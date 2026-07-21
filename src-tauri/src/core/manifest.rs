@@ -19,6 +19,10 @@ pub const STATUS_SKIPPED_MARGINAL: &str = "skipped_marginal";
 /// The pre-encode health gate rejected the source (unreadable or corrupt), so it
 /// was deliberately not encoded — distinct from `failed` (an encode that errored).
 pub const STATUS_SKIPPED_UNHEALTHY: &str = "skipped_unhealthy";
+/// Keep-both mode: the original was left in place alongside an encoded copy. The
+/// terminal record for the *original* (the copy is a separate `done` row), so it
+/// isn't re-encoded on the next run.
+pub const STATUS_KEPT: &str = "original_kept";
 pub const STATUS_FAILED: &str = "failed";
 /// Known to the library (discovered by a health scan) but not queued for
 /// encoding. A real run's `upsert_scanned` promotes it to `pending`; the claim
@@ -53,7 +57,10 @@ CREATE TABLE IF NOT EXISTS files (
     vmaf_crf          INTEGER,
     vmaf_target       REAL,
     fallback          TEXT,
-    out_ext           TEXT
+    out_ext           TEXT,
+    cur_codec         TEXT,
+    cur_height        INTEGER,
+    orig_path         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -76,6 +83,9 @@ pub struct StatusUpdate {
     /// row, so the UI can locate the current on-disk file. `None` clears it (a
     /// non-output outcome keeps the original at its source path).
     pub out_ext: Option<String>,
+    /// The original source path when a Holding-mode encode moved the original
+    /// aside (so the row can be restored). `None` otherwise.
+    pub orig_path: Option<String>,
 }
 
 /// One raw history aggregate per `(codec, height)` group:
@@ -98,6 +108,9 @@ pub struct HistoryRow {
     /// Output container extension for a done/normalized row (the re-encoded file's
     /// current extension), or `None` when the file kept its source path.
     pub out_ext: Option<String>,
+    /// Set when the original was moved to a holding folder and can be restored;
+    /// `None` when there's nothing to restore. Drives the Restore-original action.
+    pub orig_path: Option<String>,
     pub updated_at: Option<f64>,
 }
 
@@ -117,6 +130,11 @@ pub struct LibraryRow {
     /// Output container extension for a done/normalized row, so the library can
     /// resolve the current on-disk file. `None` when the file kept its source path.
     pub out_ext: Option<String>,
+    /// The *current* on-disk file's codec/height (what the Library shows) — the
+    /// re-encoded output for a done row, or the probed file for a scanned one. Falls
+    /// back to `src_codec`/`height` in the UI when not yet recorded.
+    pub cur_codec: Option<String>,
+    pub cur_height: Option<u32>,
     pub updated_at: Option<f64>,
 }
 
@@ -174,6 +192,16 @@ impl Manifest {
         // can resolve the current on-disk file when the extension changed from the
         // source. Only set on done/normalized rows.
         let _ = conn.execute("ALTER TABLE files ADD COLUMN out_ext TEXT", []);
+        // The *current* on-disk file's codec/height (as opposed to src_codec/height,
+        // which is the original source). Set by a health scan (which probes whatever
+        // file is there now) and by the pipeline for a re-encoded output, so the
+        // Library can show the current file while History keeps the original source.
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN cur_codec TEXT", []);
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN cur_height INTEGER", []);
+        // The original source path a restorable (Holding-mode) encode moved aside,
+        // so the row (now keyed by the output) can be undone. NULL when there's
+        // nothing to restore (recycle/delete/keep-both, or never encoded).
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN orig_path TEXT", []);
         // The "warning" (playback-caveat) health verdict was dropped; those files
         // probed fine, so fold any legacy rows back into "healthy".
         let _ = conn.execute(
@@ -236,8 +264,8 @@ impl Manifest {
         conn.execute(
             "UPDATE files SET status=?1, src_codec=COALESCE(?2, src_codec), \
              height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, \
-             encode_ms=COALESCE(?7, encode_ms), fallback=?8, out_ext=?9, updated_at=?10 \
-             WHERE path=?11",
+             encode_ms=COALESCE(?7, encode_ms), fallback=?8, out_ext=?9, \
+             orig_path=?10, updated_at=?11 WHERE path=?12",
             params![
                 status,
                 upd.src_codec,
@@ -248,6 +276,7 @@ impl Manifest {
                 upd.encode_ms,
                 upd.fallback,
                 upd.out_ext,
+                upd.orig_path,
                 now(),
                 path,
             ],
@@ -432,7 +461,7 @@ impl Manifest {
 
         let mut sql = String::from(
             "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, \
-             fallback, out_ext, updated_at FROM files",
+             fallback, out_ext, orig_path, updated_at FROM files",
         );
         // History is the pipeline ledger — library-only (indexed) rows that were
         // merely health-scanned, never processed, don't belong here.
@@ -479,26 +508,26 @@ impl Manifest {
     /// probe revealed. Never touches `status`: health is an orthogonal axis, so a
     /// scan can annotate a `done` or `pending` row without re-queuing it. Codec and
     /// height are COALESCE-guarded so a `None` probe never wipes known metadata.
-    /// Record a health verdict for a file. `src_codec`/`height` are filled in only
-    /// when the row doesn't already have them — for an encoded row they hold the
-    /// *original source* codec/height (a historical fact set by the pipeline), and
-    /// a later scan probes the re-encoded *output* (a different codec), which must
-    /// not overwrite that source record. A never-encoded row starts with them NULL,
-    /// so its first scan still populates them.
+    /// Record a health verdict plus the *current* on-disk file's codec/height
+    /// (`cur_codec`/`cur_height`). These describe whatever file is there now — for
+    /// a re-encoded row that's the output (e.g. av1), which is what the Library
+    /// shows. It deliberately never touches `src_codec`/`height` (the original
+    /// source), so History keeps showing what the file was encoded *from*. `None`
+    /// (e.g. an unreadable file that wouldn't probe) leaves the prior value.
     pub fn record_health(
         &self,
         path: &str,
         health: &str,
         detail: Option<&str>,
-        src_codec: Option<&str>,
-        height: Option<u32>,
+        cur_codec: Option<&str>,
+        cur_height: Option<u32>,
     ) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE files SET health=?1, health_detail=?2, health_checked_at=?3, \
-             src_codec=CASE WHEN src_codec IS NULL THEN ?4 ELSE src_codec END, \
-             height=CASE WHEN height IS NULL THEN ?5 ELSE height END WHERE path=?6",
-            params![health, detail, now(), src_codec, height, path],
+             cur_codec=COALESCE(?4, cur_codec), cur_height=COALESCE(?5, cur_height) \
+             WHERE path=?6",
+            params![health, detail, now(), cur_codec, cur_height, path],
         )?;
         Ok(())
     }
@@ -548,7 +577,7 @@ impl Manifest {
 
         let mut sql = String::from(
             "SELECT path, status, size, src_codec, height, health, health_detail, \
-             health_checked_at, out_ext, updated_at FROM files",
+             health_checked_at, out_ext, cur_codec, cur_height, updated_at FROM files",
         );
         // Only scanned files belong to the Library — never the raw encode queue.
         let mut conds: Vec<String> = vec!["health IS NOT NULL".to_string()];
@@ -649,6 +678,19 @@ impl Manifest {
         Ok(())
     }
 
+    /// The restorable original's source path for a row (set only for Holding-mode
+    /// encodes), or `None` if the row has nothing to restore.
+    pub fn orig_path(&self, path: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT orig_path FROM files WHERE path=?1",
+            params![path],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    }
+
     /// Delete one row from the manifest.
     pub fn delete_one(&self, path: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -726,7 +768,8 @@ fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
         error: r.get(7)?,
         fallback: r.get(8)?,
         out_ext: r.get(9)?,
-        updated_at: r.get(10)?,
+        orig_path: r.get(10)?,
+        updated_at: r.get(11)?,
     })
 }
 
@@ -743,7 +786,11 @@ fn row_to_library(r: &rusqlite::Row) -> rusqlite::Result<LibraryRow> {
         health_detail: r.get(6)?,
         health_checked_at: r.get(7)?,
         out_ext: r.get(8)?,
-        updated_at: r.get(9)?,
+        cur_codec: r.get(9)?,
+        cur_height: r
+            .get::<_, Option<i64>>(10)?
+            .and_then(|v| u32::try_from(v).ok()),
+        updated_at: r.get(11)?,
     })
 }
 
@@ -1004,8 +1051,9 @@ mod tests {
         assert_eq!(a.path, "/a.mkv");
         assert_eq!(a.health.as_deref(), Some("corrupt"));
         assert_eq!(a.health_detail.as_deref(), Some("decode error"));
-        assert_eq!(a.src_codec.as_deref(), Some("h264"));
-        assert_eq!(a.height, Some(1080));
+        // A scan records the CURRENT file's codec/res (what the Library shows).
+        assert_eq!(a.cur_codec.as_deref(), Some("h264"));
+        assert_eq!(a.cur_height, Some(1080));
         assert!(a.health_checked_at.is_some());
 
         let counts = m.health_counts().unwrap();
@@ -1041,16 +1089,24 @@ mod tests {
                 },
             )
             .unwrap();
-            // A scan probes the re-encoded output — it must keep the source codec.
+            // A scan probes the re-encoded output — History keeps the source codec,
+            // while the Library's current codec becomes the output's.
             m.record_health(&path, "healthy", None, Some(out_codec), Some(2160))
                 .unwrap();
-            let row = &m.history(&HistoryQuery::default()).unwrap()[0];
+            let hist = &m.history(&HistoryQuery::default()).unwrap()[0];
             assert_eq!(
-                row.src_codec.as_deref(),
+                hist.src_codec.as_deref(),
                 Some(*src_codec),
                 "{src_codec}->{out_codec}"
             );
-            assert_eq!(row.height, Some(1080), "{src_codec}->{out_codec}");
+            assert_eq!(hist.height, Some(1080), "{src_codec}->{out_codec}");
+            let lib = &m.library(&HistoryQuery::default()).unwrap()[0];
+            assert_eq!(
+                lib.cur_codec.as_deref(),
+                Some(*out_codec),
+                "{src_codec}->{out_codec}"
+            );
+            assert_eq!(lib.cur_height, Some(2160), "{src_codec}->{out_codec}");
         }
     }
 

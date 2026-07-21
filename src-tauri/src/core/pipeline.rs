@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use super::abort::{AbortConfig, AbortJudge, AbortProjection};
-use super::config::{Config, HealthGate, VerifyDepth};
+use super::config::{Config, HealthGate, OnSuccess, VerifyDepth};
 use super::decode::decode_probe_progress;
 use super::encode::{build_args_q, build_remux_args, run_encode, EncodeResult, ProgressSample};
 use super::encoders::Encoder;
@@ -60,9 +60,24 @@ fn set(manifest: &Manifest, path: &str, outcome: Outcome, upd: StatusUpdate) {
 /// With the gate off, keep the legacy behavior: drop a replaced file's now-stale
 /// scan, and leave a kept file's prior scan untouched. `replaced` is true when the
 /// file was rewritten (done/normalized), false when the original was kept (a skip).
-fn record_processed_health(cfg: &Config, manifest: &Manifest, path: &str, replaced: bool) {
+/// `cur_codec`/`cur_height` describe the file that exists now (the output for a
+/// re-encode, the kept original otherwise), which is what the Library shows.
+fn record_processed_health(
+    cfg: &Config,
+    manifest: &Manifest,
+    path: &str,
+    replaced: bool,
+    cur_codec: Option<&str>,
+    cur_height: Option<u32>,
+) {
     if cfg.health_gate != HealthGate::Off {
-        let _ = manifest.record_health(path, HealthState::Healthy.as_str(), None, None, None);
+        let _ = manifest.record_health(
+            path,
+            HealthState::Healthy.as_str(),
+            None,
+            cur_codec,
+            cur_height,
+        );
     } else if replaced {
         let _ = manifest.clear_health(path);
     }
@@ -99,8 +114,16 @@ fn skip_or_normalize(
         }
     }
     set(manifest, path_str, skip, meta_of(info));
-    // The original is kept and probed fine, so record it healthy (gate on).
-    record_processed_health(cfg, manifest, path_str, false);
+    // The original is kept and probed fine — record it healthy, current codec/res
+    // = the source's own (the file is unchanged).
+    record_processed_health(
+        cfg,
+        manifest,
+        path_str,
+        false,
+        info.codec.as_deref(),
+        info.height,
+    );
     ProcessResult::new(path_str, skip)
 }
 
@@ -173,8 +196,16 @@ fn try_remux(
         },
     );
     // The remuxed output was verified playable, so record it healthy (gate on) —
-    // a normalized file still shows in the Library. (Gate off drops the stale scan.)
-    record_processed_health(cfg, manifest, path_str, true);
+    // a normalized file still shows in the Library. A remux is a stream copy, so
+    // the current codec/res is the source's own. (Gate off drops the stale scan.)
+    record_processed_health(
+        cfg,
+        manifest,
+        path_str,
+        true,
+        info.codec.as_deref(),
+        info.height,
+    );
     // Re-key the row to the file that exists now, so a rescan matches this row
     // instead of adding a duplicate for the new extension. No-op if unchanged.
     let _ = manifest.rename_path(path_str, &final_path.to_string_lossy());
@@ -608,7 +639,14 @@ pub fn process_file(
             },
         );
         // The original is kept and probed fine, so record it healthy (gate on).
-        record_processed_health(cfg, manifest, path_str, false);
+        record_processed_health(
+            cfg,
+            manifest,
+            path_str,
+            false,
+            info.codec.as_deref(),
+            info.height,
+        );
         return ProcessResult::new(path_str, Outcome::SkippedNoGain).with_message(msg);
     }
 
@@ -662,7 +700,14 @@ pub fn process_file(
                 },
             );
             // The original is kept and probed fine, so record it healthy (gate on).
-            record_processed_health(cfg, manifest, path_str, false);
+            record_processed_health(
+                cfg,
+                manifest,
+                path_str,
+                false,
+                info.codec.as_deref(),
+                info.height,
+            );
             return ProcessResult::new(path_str, Outcome::SkippedNoGain);
         }
         set(
@@ -702,6 +747,9 @@ pub fn process_file(
         .map(|s| s.to_string());
 
     let saved = size as i64 - vr.out_size as i64;
+    // Holding mode moved the original aside — record its source path so the row
+    // (about to be keyed by the output) can be restored later.
+    let orig_path = (cfg.on_success == OnSuccess::Holding).then(|| path_str.to_string());
     set(
         manifest,
         path_str,
@@ -712,20 +760,51 @@ pub fn process_file(
             encode_ms: Some(encode_ms),
             fallback: fallback_note,
             out_ext: out_ext.clone(),
+            orig_path,
             ..meta_upd(&info)
         },
     );
     // The output already passed verify_output's decode, so the final file *is*
     // freshly-verified healthy — record it (gate on) so a run populates the Library
-    // for free; gate off drops the now-stale scan of the replaced original.
-    record_processed_health(cfg, manifest, path_str, true);
+    // for free; gate off drops the now-stale scan of the replaced original. Current
+    // codec/res = the re-encoded output (its target codec, capped to max_height).
+    let out_height = info.height.map(|h| h.min(cfg.max_height));
+    record_processed_health(
+        cfg,
+        manifest,
+        path_str,
+        true,
+        Some(cfg.codec.name()),
+        out_height,
+    );
     // Re-key the row to the file that now exists on disk (the extension may have
     // changed), so a later health scan updates this row instead of discovering the
     // new path as a separate file and duplicating the Library entry. No-op when the
-    // extension is unchanged.
+    // extension is unchanged. In keep-both mode the original still exists, so this
+    // moves the Done record onto the encoded copy (not a replacement).
     let _ = manifest.rename_path(path_str, &final_path.to_string_lossy());
 
-    let mut result = ProcessResult::new(path_str, Outcome::Done);
+    // Keep-both: the original is still on disk. Give it its own terminal "kept" row
+    // (re-inserted, since its old row just moved onto the copy) so it isn't
+    // re-encoded next run and shows as a kept original with its own codec/res.
+    if cfg.on_success == OnSuccess::Nowhere {
+        if let Ok(m) = std::fs::metadata(src) {
+            let _ = manifest.upsert_scanned(path_str, m.len(), mtime_secs(&m), false, false);
+        }
+        set(manifest, path_str, Outcome::OriginalKept, meta_upd(&info));
+        record_processed_health(
+            cfg,
+            manifest,
+            path_str,
+            false,
+            info.codec.as_deref(),
+            info.height,
+        );
+    }
+
+    // The result points at the file that now exists (the copy in keep-both mode),
+    // so the live log opens the right file even when the name was numbered.
+    let mut result = ProcessResult::new(&final_path.to_string_lossy(), Outcome::Done);
     result.saved_bytes = saved;
     result.orig_size = Some(size);
     result.out_size = Some(vr.out_size);

@@ -49,6 +49,10 @@ pub enum Outcome {
     /// The pre-encode health gate rejected the source (unreadable/corrupt) — a
     /// deliberate skip, not an encode failure. Terminal, never re-encoded on resume.
     SkippedUnhealthy,
+    /// Keep-both mode: the original was left in place while an encoded copy was
+    /// written alongside it. This is the terminal record *for the original* (the
+    /// copy gets its own `Done` row); it exists so the original isn't re-encoded.
+    OriginalKept,
     Failed,
     Cancelled,
     DryRun,
@@ -66,6 +70,7 @@ impl Outcome {
             Outcome::SkippedMarginal => Some(STATUS_SKIPPED_MARGINAL),
             Outcome::SkippedNoGain => Some(STATUS_SKIPPED_NO_GAIN),
             Outcome::SkippedUnhealthy => Some(STATUS_SKIPPED_UNHEALTHY),
+            Outcome::OriginalKept => Some(STATUS_KEPT),
             Outcome::Failed => Some(STATUS_FAILED),
             Outcome::Cancelled | Outcome::DryRun => None,
         }

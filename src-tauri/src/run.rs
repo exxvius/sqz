@@ -73,6 +73,9 @@ fn tally(summary: &Mutex<RunSummary>, outcome: Outcome, saved: i64) {
             s.skipped += 1;
         }
         Outcome::SkippedUnhealthy => s.skipped_unhealthy += 1,
+        // Keep-both's kept-original side record isn't returned as a result, so tally
+        // never sees it; the arm exists only for exhaustiveness.
+        Outcome::OriginalKept => {}
         Outcome::Failed => s.failed += 1,
         Outcome::DryRun => s.would += 1,
         Outcome::Cancelled => {}

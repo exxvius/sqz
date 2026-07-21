@@ -25,6 +25,7 @@ const CHIPS: { id: Status; label: string }[] = [
   { id: "failed", label: "Failed" },
   { id: "skipped_no_gain", label: "No gain" },
   { id: "skipped_unhealthy", label: "Unhealthy" },
+  { id: "original_kept", label: "Kept" },
   { id: "skipped_already_efficient", label: "Efficient" },
   { id: "skipped_marginal", label: "Lean" },
   { id: "pending", label: "Pending" },
@@ -285,7 +286,7 @@ export function HistoryView() {
                     ⏵ Force process
                   </button>
                 )}
-                {encoded && (
+                {r.orig_path && (
                   <button className="mini-btn" onClick={() => restore(r.path)}>
                     ↶ Restore original
                   </button>

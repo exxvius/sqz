@@ -89,3 +89,10 @@ export async function pickInputs(directory: boolean): Promise<string[]> {
   if (!picked) return [];
   return Array.isArray(picked) ? picked : [picked];
 }
+
+/** Pick a single folder (e.g. the holding folder). Returns null if cancelled. */
+export async function pickFolder(title: string): Promise<string | null> {
+  const picked = await open({ multiple: false, directory: true, title });
+  if (!picked) return null;
+  return Array.isArray(picked) ? (picked[0] ?? null) : picked;
+}

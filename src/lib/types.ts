@@ -6,7 +6,7 @@ export type QualityPreset =
   | "balanced"
   | "high-quality"
   | "visually-lossless";
-export type OnSuccess = "recycle" | "holding" | "delete";
+export type OnSuccess = "recycle" | "holding" | "delete" | "nowhere";
 export type EncoderFamily = "nvenc" | "amf" | "qsv" | "videotoolbox" | "software";
 export type Container = "mkv" | "mp4";
 export type AudioMode = "copy" | "opus" | "aac";
@@ -147,6 +147,7 @@ export type Outcome =
   | "skipped_marginal"
   | "skipped_no_gain"
   | "skipped_unhealthy"
+  | "original_kept"
   | "failed"
   | "cancelled"
   | "dry_run";
@@ -162,6 +163,7 @@ export type Status =
   | "skipped_marginal"
   | "skipped_no_gain"
   | "skipped_unhealthy"
+  | "original_kept"
   | "failed";
 
 /** Per-file library health verdict (from a health scan). */
@@ -180,6 +182,11 @@ export interface LibraryRow {
   /** Output container extension (e.g. "mkv") for a done/normalized row, so the UI
    *  can locate the current on-disk file; null when the file kept its source path. */
   out_ext: string | null;
+  /** The current on-disk file's codec/resolution (what the Library shows) — the
+   *  re-encoded output for a done row, the probed file for a scanned one. Falls
+   *  back to src_codec/height when not yet recorded. */
+  cur_codec: string | null;
+  cur_height: number | null;
   updated_at: number | null;
 }
 
@@ -262,6 +269,9 @@ export interface HistoryRow {
   /** Output container extension (e.g. "mkv") for a done/normalized row; null when
    *  the file kept its source path. */
   out_ext: string | null;
+  /** The original source path when a Holding-mode encode moved the original aside,
+   *  so it can be restored; null when there's nothing to restore. */
+  orig_path: string | null;
   updated_at: number | null;
 }
 
