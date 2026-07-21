@@ -289,7 +289,10 @@ mod tests {
         assert_eq!(software_encoder(Codec::Hevc).unwrap().name, "libx265");
         assert_eq!(software_encoder(Codec::H264).unwrap().name, "libx264");
         for codec in [Codec::Av1, Codec::Hevc, Codec::H264] {
-            assert_eq!(software_encoder(codec).unwrap().family, EncoderFamily::Software);
+            assert_eq!(
+                software_encoder(codec).unwrap().family,
+                EncoderFamily::Software
+            );
         }
     }
 }

@@ -86,11 +86,23 @@ mod tests {
 
     #[test]
     fn scaler_prefers_cuda_then_npp() {
-        let both = HwCaps { cuda: true, scale_cuda: true, scale_npp: true };
+        let both = HwCaps {
+            cuda: true,
+            scale_cuda: true,
+            scale_npp: true,
+        };
         assert_eq!(both.scaler(), Some("scale_cuda"));
-        let npp = HwCaps { cuda: true, scale_cuda: false, scale_npp: true };
+        let npp = HwCaps {
+            cuda: true,
+            scale_cuda: false,
+            scale_npp: true,
+        };
         assert_eq!(npp.scaler(), Some("scale_npp"));
-        let none = HwCaps { cuda: true, scale_cuda: false, scale_npp: false };
+        let none = HwCaps {
+            cuda: true,
+            scale_cuda: false,
+            scale_npp: false,
+        };
         assert_eq!(none.scaler(), None);
         assert!(!none.gpu_scale());
     }

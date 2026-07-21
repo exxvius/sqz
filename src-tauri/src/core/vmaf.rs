@@ -86,9 +86,9 @@ pub fn sample_plan(width: Option<u32>, height: Option<u32>) -> (usize, f64) {
     // — can be trimmed as an outlier instead of dragging the whole result into a
     // bottom-out. Windows shorten as the frame grows, to bound decode/encode cost.
     match px {
-        p if p > 16 * MP => (4, 6.0),  // 6K/8K/VR
-        p if p > 4 * MP => (4, 10.0),  // > 1080p up to ~4K
-        _ => (4, 12.0),                // <= 1080p
+        p if p > 16 * MP => (4, 6.0), // 6K/8K/VR
+        p if p > 4 * MP => (4, 10.0), // > 1080p up to ~4K
+        _ => (4, 12.0),               // <= 1080p
     }
 }
 
@@ -228,8 +228,16 @@ pub fn resolve_crf(
     // Auto plan from the resolution, overridden by the user's explicit choices
     // (a speed vs. accuracy knob): 0 means "auto" for either dimension.
     let (auto_n, auto_secs) = sample_plan(info.width, info.height);
-    let samples = if cfg.vmaf_samples > 0 { cfg.vmaf_samples } else { auto_n };
-    let secs = if cfg.vmaf_sample_secs > 0.0 { cfg.vmaf_sample_secs } else { auto_secs };
+    let samples = if cfg.vmaf_samples > 0 {
+        cfg.vmaf_samples
+    } else {
+        auto_n
+    };
+    let secs = if cfg.vmaf_sample_secs > 0.0 {
+        cfg.vmaf_sample_secs
+    } else {
+        auto_secs
+    };
     let windows = sample_windows(duration, samples, secs);
     if windows.is_empty() {
         return None;
@@ -259,7 +267,17 @@ pub fn resolve_crf(
         let refp = temp_dir.join(format!("sqz_vref_{}.mkv", uuid::Uuid::new_v4().simple()));
         let base = completed.get() as f64;
         let mut on_ext = |p: f64| on_progress(((base + p) / total_units).min(0.999));
-        if !extract_ref(ff, cfg, encoder, info, start, len, &refp, cancel, &mut on_ext) {
+        if !extract_ref(
+            ff,
+            cfg,
+            encoder,
+            info,
+            start,
+            len,
+            &refp,
+            cancel,
+            &mut on_ext,
+        ) {
             let _ = std::fs::remove_file(&refp);
             cleanup_refs(&refs);
             return None;
@@ -283,13 +301,24 @@ pub fn resolve_crf(
             let dist = temp_dir.join(format!("sqz_vmaf_{}.mkv", uuid::Uuid::new_v4().simple()));
             let base = completed.get() as f64;
             let mut on_enc = |p: f64| on_progress(((base + 0.5 * p) / total_units).min(0.999));
-            let encoded =
-                encode_from_ref(ff, cfg, encoder, info, refp, *len, crf, &dist, cancel, &mut on_enc);
+            let encoded = encode_from_ref(
+                ff,
+                cfg,
+                encoder,
+                info,
+                refp,
+                *len,
+                crf,
+                &dist,
+                cancel,
+                &mut on_enc,
+            );
             if !encoded {
                 let _ = std::fs::remove_file(&dist);
                 return None;
             }
-            let mut on_meas = |p: f64| on_progress(((base + 0.5 + 0.5 * p) / total_units).min(0.999));
+            let mut on_meas =
+                |p: f64| on_progress(((base + 0.5 + 0.5 * p) / total_units).min(0.999));
             let score = measure_pair(ff, refp, &dist, *len, cancel, &mut on_meas);
             let _ = std::fs::remove_file(&dist);
             let s = score?;
@@ -472,9 +501,17 @@ fn extract_ref(
         a.push(software_scale_vf(cfg));
     }
     a.extend(
-        ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-pix_fmt"]
-            .iter()
-            .map(|s| s.to_string()),
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "10",
+            "-pix_fmt",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
     );
     a.push(pix_fmt(cfg, info, encoder).into());
     a.push("-an".into());
@@ -550,11 +587,18 @@ fn measure_pair(
 ) -> Option<f64> {
     let filter = format!("[0:v][1:v]libvmaf=n_threads={}", vmaf_threads());
     let mut cmd = command_no_window(&ff.ffmpeg);
-    cmd.args(["-hide_banner", "-nostdin", "-nostats", "-progress", "pipe:1", "-i"])
-        .arg(dist)
-        .arg("-i")
-        .arg(reference)
-        .args(["-filter_complex", &filter, "-an", "-f", "null", "-"]);
+    cmd.args([
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-i",
+    ])
+    .arg(dist)
+    .arg("-i")
+    .arg(reference)
+    .args(["-filter_complex", &filter, "-an", "-f", "null", "-"]);
 
     let span = len.max(0.001);
     let mut on_sec = |sec: f64| report((sec / span).clamp(0.0, 1.0));
@@ -650,7 +694,7 @@ mod tests {
         // One pathological window is dropped; the rest are averaged.
         let m = aggregate_vmaf(&[78.0, 96.0, 95.0, 97.0]);
         assert!((m - 96.0).abs() < 1e-9); // mean of 95, 96, 97
-        // Fewer than four → plain mean (nothing trimmed).
+                                          // Fewer than four → plain mean (nothing trimmed).
         assert!((aggregate_vmaf(&[78.0, 96.0]) - 87.0).abs() < 1e-9);
         assert_eq!(aggregate_vmaf(&[]), 0.0);
     }

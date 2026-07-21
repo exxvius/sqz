@@ -25,7 +25,9 @@ fn nearest_existing(path: &Path) -> PathBuf {
 #[cfg(unix)]
 fn device_of(path: &Path) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(nearest_existing(path)).ok().map(|m| m.dev())
+    std::fs::metadata(nearest_existing(path))
+        .ok()
+        .map(|m| m.dev())
 }
 
 #[cfg(windows)]
@@ -144,7 +146,12 @@ pub fn holding_path_for(source: &Path, cfg: &Config) -> PathBuf {
         let tag = win_volume(&abs).unwrap_or_else(|| "root".into());
         let rel: PathBuf = abs
             .components()
-            .filter(|c| !matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir))
+            .filter(|c| {
+                !matches!(
+                    c,
+                    std::path::Component::Prefix(_) | std::path::Component::RootDir
+                )
+            })
             .collect();
         return holding.join(tag).join(rel);
     }
@@ -182,9 +189,18 @@ mod tests {
     #[test]
     fn detects_managed_dirs() {
         let cfg = Config::default();
-        assert!(is_under_managed_dir(Path::new("/media/.sqz_tmp/x.mkv"), &cfg));
-        assert!(is_under_managed_dir(Path::new("/media/.sqz_originals/x.mkv"), &cfg));
-        assert!(!is_under_managed_dir(Path::new("/media/movies/x.mkv"), &cfg));
+        assert!(is_under_managed_dir(
+            Path::new("/media/.sqz_tmp/x.mkv"),
+            &cfg
+        ));
+        assert!(is_under_managed_dir(
+            Path::new("/media/.sqz_originals/x.mkv"),
+            &cfg
+        ));
+        assert!(!is_under_managed_dir(
+            Path::new("/media/movies/x.mkv"),
+            &cfg
+        ));
     }
 
     #[test]

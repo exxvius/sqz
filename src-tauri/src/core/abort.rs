@@ -92,7 +92,9 @@ impl AbortJudge {
             None
         } else if frac < self.cfg.check_at {
             // Stage 1: catch a runaway that will clearly be much larger.
-            (projected >= src * (1.0 + self.cfg.bloat_margin)).then(hit).flatten()
+            (projected >= src * (1.0 + self.cfg.bloat_margin))
+                .then(hit)
+                .flatten()
         } else if frac < STAGE3_AT {
             // Stage 2: under the gate and trending worse.
             (savings < self.cfg.min_savings && self.is_worsening())

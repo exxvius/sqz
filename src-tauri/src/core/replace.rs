@@ -199,7 +199,10 @@ pub fn recover_stashes(roots: &[PathBuf]) {
             {
                 if entry.file_type().is_file() {
                     let p = entry.path();
-                    if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(STASH_SUFFIX)) {
+                    if p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.ends_with(STASH_SUFFIX))
+                    {
                         finish_stash(p);
                     }
                 }
@@ -260,7 +263,10 @@ mod tests {
         let missing = d.join("does_not_exist.mkv");
         write_file(&src, b"the-precious-original");
 
-        let cfg = Config { on_success: OnSuccess::Delete, ..Config::default() };
+        let cfg = Config {
+            on_success: OnSuccess::Delete,
+            ..Config::default()
+        };
         let res = replace_original(&cfg, &src, &missing);
         assert!(res.is_err());
         assert!(src.exists(), "original must survive a failed swap");
@@ -286,7 +292,10 @@ mod tests {
         };
         let res = replace_original(&cfg, &src, &missing);
         assert!(res.is_err());
-        assert!(src.exists(), "original must be moved back from holding on failure");
+        assert!(
+            src.exists(),
+            "original must be moved back from holding on failure"
+        );
         assert_eq!(std::fs::read(&src).unwrap(), b"holding-original");
 
         let _ = std::fs::remove_dir_all(&d);
@@ -302,9 +311,15 @@ mod tests {
         write_file(&bystander, b"do-not-touch-me");
         write_file(&enc, b"encoded");
 
-        let cfg = Config { on_success: OnSuccess::Delete, ..Config::default() };
+        let cfg = Config {
+            on_success: OnSuccess::Delete,
+            ..Config::default()
+        };
         let res = replace_original(&cfg, &src, &enc);
-        assert!(res.is_err(), "must refuse when the .mkv target already exists");
+        assert!(
+            res.is_err(),
+            "must refuse when the .mkv target already exists"
+        );
         assert!(src.exists());
         assert_eq!(std::fs::read(&bystander).unwrap(), b"do-not-touch-me");
 
@@ -319,7 +334,10 @@ mod tests {
         // No movie.mkv present ⇒ the swap never committed ⇒ restore.
         recover_stashes(&[d.clone()]);
         assert!(d.join("movie.mp4").exists());
-        assert_eq!(std::fs::read(d.join("movie.mp4")).unwrap(), b"interrupted-original");
+        assert_eq!(
+            std::fs::read(d.join("movie.mp4")).unwrap(),
+            b"interrupted-original"
+        );
         assert!(!stash.exists());
 
         let _ = std::fs::remove_dir_all(&d);
@@ -333,8 +351,14 @@ mod tests {
         write_file(&d.join("movie.mkv"), b"committed-output"); // swap completed
         recover_stashes(&[d.clone()]);
         assert!(!stash.exists(), "stale stash should be dropped");
-        assert!(!d.join("movie.mp4").exists(), "must not resurrect the original");
-        assert_eq!(std::fs::read(d.join("movie.mkv")).unwrap(), b"committed-output");
+        assert!(
+            !d.join("movie.mp4").exists(),
+            "must not resurrect the original"
+        );
+        assert_eq!(
+            std::fs::read(d.join("movie.mkv")).unwrap(),
+            b"committed-output"
+        );
 
         let _ = std::fs::remove_dir_all(&d);
     }

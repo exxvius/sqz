@@ -137,7 +137,9 @@ pub fn download(app: &AppHandle, data_dir: &Path) -> Result<(), String> {
     // Verify what we installed actually runs.
     let ff = current(data_dir);
     if !runs(&ff.ffmpeg) || !runs(&ff.ffprobe) {
-        return Err("Downloaded FFmpeg, but it did not run. Try again or use your own binary.".into());
+        return Err(
+            "Downloaded FFmpeg, but it did not run. Try again or use your own binary.".into(),
+        );
     }
     emit(app, "done", 1, 1);
     Ok(())
@@ -186,7 +188,12 @@ fn make_executable(path: &Path) {
     let _ = path;
 }
 
-fn extract_zip(_app: &AppHandle, archive: &Path, bin: &Path, wanted: &[&str]) -> Result<(), String> {
+fn extract_zip(
+    _app: &AppHandle,
+    archive: &Path,
+    bin: &Path,
+    wanted: &[&str],
+) -> Result<(), String> {
     let file = File::open(archive).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     for i in 0..zip.len() {

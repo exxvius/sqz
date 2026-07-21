@@ -34,7 +34,9 @@ fn beside_exe(base: &str) -> Option<PathBuf> {
 }
 
 fn env_override(var: &str) -> Option<PathBuf> {
-    std::env::var_os(var).map(PathBuf::from).filter(|p| p.exists())
+    std::env::var_os(var)
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
 }
 
 fn resolve_one(base: &str, env_var: &str, data_dir: &Path, custom: Option<&Path>) -> PathBuf {

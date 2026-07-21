@@ -931,10 +931,7 @@ pub fn list_libraries(state: State<'_, AppState>) -> Vec<SavedLibrary> {
 /// strips profile inputs, and validates the encode target before persisting.
 /// Echoes the stored row back so the UI learns the assigned id.
 #[tauri::command]
-pub fn save_library(
-    lib: SavedLibrary,
-    state: State<'_, AppState>,
-) -> Result<SavedLibrary, String> {
+pub fn save_library(lib: SavedLibrary, state: State<'_, AppState>) -> Result<SavedLibrary, String> {
     guard_locked(&state)?;
     let normalized = lib.normalized()?;
     let path = state.libraries_path();

@@ -370,7 +370,10 @@ mod tests {
         ten_bit.pix_fmt = Some("yuv420p10le".into());
         assert!(is_already_efficient(&cfg, &ten_bit));
         // With Source depth, an 8-bit file stays efficient (depth isn't a driver).
-        let src_cfg = Config { bit_depth: BitDepth::Source, ..cfg };
+        let src_cfg = Config {
+            bit_depth: BitDepth::Source,
+            ..cfg
+        };
         assert!(is_already_efficient(&src_cfg, &eight_bit));
     }
 
