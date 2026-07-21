@@ -1747,6 +1747,10 @@
   flex-wrap: wrap;
   padding: 0 var(--space-4) var(--space-4);
 }
+/* The destructive "Remove" action sits apart from the rest, pushed to the right. */
+.ecard-actions > .danger {
+  margin-left: auto;
+}
 .ecard-collapse {
   display: grid;
   grid-template-rows: 0fr;
