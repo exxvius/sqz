@@ -25,6 +25,7 @@ export const api = {
     invoke<ReclaimProjection>("project_reclaim", { config }),
   scanHealth: (config: RunConfig, deep: boolean) =>
     invoke<HealthSummary>("scan_health", { config, deep }),
+  cancelScan: () => invoke<void>("cancel_scan"),
   getLibrary: (filter: HistoryFilter = {}) => invoke<Library>("get_library", { filter }),
   deleteLibraryPaths: (paths: string[]) =>
     invoke<number>("delete_library_paths", { paths }),

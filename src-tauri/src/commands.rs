@@ -802,6 +802,18 @@ pub fn is_running(state: State<'_, AppState>) -> bool {
     state.run.lock().unwrap().is_some()
 }
 
+/// Cancel an in-progress health scan. Flips the scan's cancel token; the scan
+/// loop stops promptly and emits its (cancelled) summary. A no-op if no scan is
+/// active (it may have just finished).
+#[tauri::command]
+pub fn cancel_scan(state: State<'_, AppState>) -> Result<(), String> {
+    guard_locked(&state)?;
+    if let Some(token) = state.health.lock().unwrap().as_ref() {
+        token.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 /// Quit the whole app (used by the "quit anyway" close-warning action).
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {

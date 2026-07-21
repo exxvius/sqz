@@ -262,7 +262,7 @@ export function HistoryView() {
                 <span className="saved-tag">−{humanBytes(r.saved_bytes)}</span>
               ) : null;
             const encoded = r.status === "done" || r.status === "normalized";
-            const filePath = currentPath(r.path, encoded);
+            const filePath = currentPath(r.path, encoded, r.out_ext);
             const actions = locked ? null : (
               <>
                 {r.status !== "failed" && (

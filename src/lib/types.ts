@@ -177,6 +177,9 @@ export interface LibraryRow {
   health: HealthState | null;
   health_detail: string | null;
   health_checked_at: number | null;
+  /** Output container extension (e.g. "mkv") for a done/normalized row, so the UI
+   *  can locate the current on-disk file; null when the file kept its source path. */
+  out_ext: string | null;
   updated_at: number | null;
 }
 
@@ -226,6 +229,8 @@ export interface ProcessResult {
   message: string;
   orig_size: number | null;
   out_size: number | null;
+  /** Output container extension when re-encoded/normalized to a new container. */
+  out_ext: string | null;
 }
 
 export interface RunSummary {
@@ -254,6 +259,9 @@ export interface HistoryRow {
   error: string | null;
   /** Note when the encode succeeded only via a pipeline fallback (with reason). */
   fallback: string | null;
+  /** Output container extension (e.g. "mkv") for a done/normalized row; null when
+   *  the file kept its source path. */
+  out_ext: string | null;
   updated_at: number | null;
 }
 

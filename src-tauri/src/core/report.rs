@@ -13,6 +13,9 @@ pub struct ProcessResult {
     pub message: String,
     pub orig_size: Option<u64>,
     pub out_size: Option<u64>,
+    /// Output container extension when the file was re-encoded/normalized to a new
+    /// container (so the UI can open the current file), else `None`.
+    pub out_ext: Option<String>,
 }
 
 impl ProcessResult {
@@ -24,6 +27,7 @@ impl ProcessResult {
             message: String::new(),
             orig_size: None,
             out_size: None,
+            out_ext: None,
         }
     }
 

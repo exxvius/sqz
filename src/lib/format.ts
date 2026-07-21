@@ -23,12 +23,15 @@ export function fileName(path: string): string {
 
 /**
  * The path of the file that actually exists on disk now. A re-encoded/normalized
- * file was rewritten to `.mkv` (its original extension went to the trash), so
- * point "open" actions at the `.mkv`; anything else keeps its original path.
+ * source was rewritten to the run's container, so its extension may differ from
+ * the original (which went to the trash). `outExt` is that container extension as
+ * recorded on the row; use it to point "open" actions at the current file. A
+ * non-encoded row keeps its source path. Legacy rows encoded before the extension
+ * was recorded fall back to `.mkv` (the historical default).
  */
-export function currentPath(path: string, encoded: boolean): string {
+export function currentPath(path: string, encoded: boolean, outExt?: string | null): string {
   if (!encoded) return path;
-  return path.replace(/\.[^./\\]+$/, ".mkv");
+  return path.replace(/\.[^./\\]+$/, `.${outExt || "mkv"}`);
 }
 
 export function fmtDuration(sec: number): string {

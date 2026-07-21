@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS files (
     health_checked_at REAL,
     vmaf_crf          INTEGER,
     vmaf_target       REAL,
-    fallback          TEXT
+    fallback          TEXT,
+    out_ext           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
 ";
@@ -71,6 +72,10 @@ pub struct StatusUpdate {
     /// Diagnostic note when the encode succeeded only after falling back from the
     /// preferred pipeline (carries the reason). `None` clears any prior note.
     pub fallback: Option<String>,
+    /// The output's container extension (e.g. "mkv"/"mp4") for a done/normalized
+    /// row, so the UI can locate the current on-disk file. `None` clears it (a
+    /// non-output outcome keeps the original at its source path).
+    pub out_ext: Option<String>,
 }
 
 /// One raw history aggregate per `(codec, height)` group:
@@ -90,6 +95,9 @@ pub struct HistoryRow {
     pub error: Option<String>,
     /// Note when the encode succeeded only via a pipeline fallback (with reason).
     pub fallback: Option<String>,
+    /// Output container extension for a done/normalized row (the re-encoded file's
+    /// current extension), or `None` when the file kept its source path.
+    pub out_ext: Option<String>,
     pub updated_at: Option<f64>,
 }
 
@@ -106,6 +114,9 @@ pub struct LibraryRow {
     pub health: Option<String>,
     pub health_detail: Option<String>,
     pub health_checked_at: Option<f64>,
+    /// Output container extension for a done/normalized row, so the library can
+    /// resolve the current on-disk file. `None` when the file kept its source path.
+    pub out_ext: Option<String>,
     pub updated_at: Option<f64>,
 }
 
@@ -159,6 +170,10 @@ impl Manifest {
         // A diagnostic note when a file succeeded only after falling back from the
         // preferred (GPU-resident) encode pipeline — carries the ffmpeg reason.
         let _ = conn.execute("ALTER TABLE files ADD COLUMN fallback TEXT", []);
+        // The re-encoded output's container extension (e.g. "mkv"/"mp4"), so the UI
+        // can resolve the current on-disk file when the extension changed from the
+        // source. Only set on done/normalized rows.
+        let _ = conn.execute("ALTER TABLE files ADD COLUMN out_ext TEXT", []);
         // The "warning" (playback-caveat) health verdict was dropped; those files
         // probed fine, so fold any legacy rows back into "healthy".
         let _ = conn.execute(
@@ -221,7 +236,8 @@ impl Manifest {
         conn.execute(
             "UPDATE files SET status=?1, src_codec=COALESCE(?2, src_codec), \
              height=COALESCE(?3, height), out_size=?4, saved_bytes=?5, error=?6, \
-             encode_ms=COALESCE(?7, encode_ms), fallback=?8, updated_at=?9 WHERE path=?10",
+             encode_ms=COALESCE(?7, encode_ms), fallback=?8, out_ext=?9, updated_at=?10 \
+             WHERE path=?11",
             params![
                 status,
                 upd.src_codec,
@@ -231,6 +247,7 @@ impl Manifest {
                 upd.error,
                 upd.encode_ms,
                 upd.fallback,
+                upd.out_ext,
                 now(),
                 path,
             ],
@@ -415,7 +432,7 @@ impl Manifest {
 
         let mut sql = String::from(
             "SELECT path, status, size, src_codec, height, out_size, saved_bytes, error, \
-             fallback, updated_at FROM files",
+             fallback, out_ext, updated_at FROM files",
         );
         // History is the pipeline ledger — library-only (indexed) rows that were
         // merely health-scanned, never processed, don't belong here.
@@ -524,7 +541,7 @@ impl Manifest {
 
         let mut sql = String::from(
             "SELECT path, status, size, src_codec, height, health, health_detail, \
-             health_checked_at, updated_at FROM files",
+             health_checked_at, out_ext, updated_at FROM files",
         );
         // Only scanned files belong to the Library — never the raw encode queue.
         let mut conds: Vec<String> = vec!["health IS NOT NULL".to_string()];
@@ -683,7 +700,8 @@ fn row_to_history(r: &rusqlite::Row) -> rusqlite::Result<HistoryRow> {
         saved_bytes: r.get(6)?,
         error: r.get(7)?,
         fallback: r.get(8)?,
-        updated_at: r.get(9)?,
+        out_ext: r.get(9)?,
+        updated_at: r.get(10)?,
     })
 }
 
@@ -699,7 +717,8 @@ fn row_to_library(r: &rusqlite::Row) -> rusqlite::Result<LibraryRow> {
         health: r.get(5)?,
         health_detail: r.get(6)?,
         health_checked_at: r.get(7)?,
-        updated_at: r.get(8)?,
+        out_ext: r.get(8)?,
+        updated_at: r.get(9)?,
     })
 }
 

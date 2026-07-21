@@ -27,7 +27,7 @@ export function EventLog({ log, onRetry, onForce }: Props) {
         const isFail = e.outcome === "failed";
         const isSkip = e.outcome.startsWith("skipped");
         const encoded = e.outcome === "done" || e.outcome === "normalized";
-        const filePath = currentPath(e.path, encoded);
+        const filePath = currentPath(e.path, encoded, e.outExt);
         const meta =
           e.outcome === "done" || e.outcome === "normalized" ? (
             <span className="saved-tag">−{humanBytes(e.savedBytes)}</span>

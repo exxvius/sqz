@@ -140,6 +140,7 @@ fn try_remux(
         return None;
     }
     let saved = size as i64 - out_size as i64;
+    let out_ext = cfg.container.ext().to_string();
     set(
         manifest,
         path_str,
@@ -147,6 +148,7 @@ fn try_remux(
         StatusUpdate {
             out_size: Some(out_size),
             saved_bytes: Some(saved),
+            out_ext: Some(out_ext.clone()),
             ..meta_of(info)
         },
     );
@@ -157,6 +159,7 @@ fn try_remux(
     r.saved_bytes = saved;
     r.orig_size = Some(size);
     r.out_size = Some(out_size);
+    r.out_ext = Some(out_ext);
     Some(r)
 }
 
@@ -648,19 +651,28 @@ pub fn process_file(
             .with_message(format!("verify {:?}", vr.reason));
     }
 
-    if let Err(e) = super::replace::replace_original(cfg, src, &out) {
-        cleanup(&out);
-        set(
-            manifest,
-            path_str,
-            Outcome::Failed,
-            StatusUpdate {
-                error: Some(format!("replace: {e}")),
-                ..meta_upd(&info)
-            },
-        );
-        return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
-    }
+    let final_path = match super::replace::replace_original(cfg, src, &out) {
+        Ok(p) => p,
+        Err(e) => {
+            cleanup(&out);
+            set(
+                manifest,
+                path_str,
+                Outcome::Failed,
+                StatusUpdate {
+                    error: Some(format!("replace: {e}")),
+                    ..meta_upd(&info)
+                },
+            );
+            return ProcessResult::new(path_str, Outcome::Failed).with_message(e.to_string());
+        }
+    };
+    // The output's container extension — the source may have had a different one
+    // (e.g. .mp4 → .mkv), so the UI resolves the current on-disk file from this.
+    let out_ext = final_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_string());
 
     let saved = size as i64 - vr.out_size as i64;
     set(
@@ -672,6 +684,7 @@ pub fn process_file(
             saved_bytes: Some(saved),
             encode_ms: Some(encode_ms),
             fallback: fallback_note,
+            out_ext: out_ext.clone(),
             ..meta_upd(&info)
         },
     );
@@ -691,6 +704,7 @@ pub fn process_file(
     result.saved_bytes = saved;
     result.orig_size = Some(size);
     result.out_size = Some(vr.out_size);
+    result.out_ext = out_ext;
     result
 }
 

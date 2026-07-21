@@ -63,6 +63,9 @@ export function LibraryView({ goDashboard }: Props) {
   const [filters, setFilters] = useState<Set<HealthState>>(new Set());
   const [libraries, setLibraries] = useState<SavedLibrary[]>([]);
   const [editing, setEditing] = useState<SavedLibrary | null>(null);
+  // Which saved library's scan is in flight, so its progress shows inline in that
+  // row (there's only ever one scan at a time). Cleared when scanning stops.
+  const [scanningId, setScanningId] = useState<string | null>(null);
 
   const refreshLibraries = useCallback(() => {
     api.listLibraries().then(setLibraries);
@@ -103,6 +106,19 @@ export function LibraryView({ goDashboard }: Props) {
     wasRunning.current = running;
   }, [running, refresh]);
 
+  // A scan writes each file's health to the DB as it finishes; poll so results
+  // stream into the list live instead of only appearing when the scan completes.
+  useEffect(() => {
+    if (!scanning) return;
+    const id = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(id);
+  }, [scanning, refresh]);
+
+  // Forget which row is scanning once the scan stops.
+  useEffect(() => {
+    if (!scanning) setScanningId(null);
+  }, [scanning]);
+
   // A library encodes to its own embedded profile: profile + roots → the
   // existing run/scan paths. Kicking off a run jumps to the Live tab so the
   // encode is visible immediately.
@@ -113,6 +129,7 @@ export function LibraryView({ goDashboard }: Props) {
   };
   const scanLibrary = (lib: SavedLibrary, deep: boolean) => {
     if (scanning) return;
+    setScanningId(lib.id);
     store.startScan({ ...lib.profile, inputs: lib.roots }, deep);
   };
 
@@ -159,7 +176,7 @@ export function LibraryView({ goDashboard }: Props) {
       // Match the file that exists now (a done source resolves to its .mkv), so
       // searching for the real on-disk name finds the row the card displays.
       const encoded = r.status === "done" || r.status === "normalized";
-      const p = currentPath(r.path, encoded).toLowerCase();
+      const p = currentPath(r.path, encoded, r.out_ext).toLowerCase();
       if (!p.includes(search.toLowerCase())) return false;
     }
     return true;
@@ -242,79 +259,92 @@ export function LibraryView({ goDashboard }: Props) {
             </p>
           ) : (
             <div className="lib-list" style={{ marginTop: "var(--space-3)" }}>
-              {libraries.map((lib) => (
-                <div className="lib-row" key={lib.id}>
-                  <div className="lib-row-main">
-                    <span className="lib-name">{lib.name}</span>
-                    <span className="muted lib-meta">
-                      {lib.roots.length} folder{lib.roots.length === 1 ? "" : "s"} ·{" "}
-                      {profileSummary(lib.profile)}
-                    </span>
+              {libraries.map((lib) => {
+                const isScanningThis = scanning && scanningId === lib.id;
+                return (
+                  <div className="lib-row" key={lib.id}>
+                    <div className="lib-row-main">
+                      <span className="lib-name">{lib.name}</span>
+                      <span className="muted lib-meta">
+                        {lib.roots.length} folder{lib.roots.length === 1 ? "" : "s"} ·{" "}
+                        {profileSummary(lib.profile)}
+                      </span>
+                    </div>
+                    <div className="lib-row-actions">
+                      {isScanningThis ? (
+                        <button
+                          className="mini-btn danger"
+                          onClick={() => store.cancelScan()}
+                          title="Stop this scan"
+                        >
+                          ✕ Cancel
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            className="mini-btn"
+                            onClick={() => runLibrary(lib)}
+                            disabled={store.running || scanning || lib.roots.length === 0}
+                            title="Encode this library with its profile"
+                          >
+                            <PlayIcon /> Run
+                          </button>
+                          <button
+                            className="mini-btn"
+                            onClick={() => scanLibrary(lib, false)}
+                            disabled={scanning || lib.roots.length === 0}
+                            title="Health-scan this library's folders"
+                          >
+                            <SearchIcon /> Scan
+                          </button>
+                          <button
+                            className="mini-btn"
+                            onClick={() => scanLibrary(lib, true)}
+                            disabled={scanning || lib.roots.length === 0}
+                            title="Decode each file to catch silent corruption (slower)"
+                          >
+                            <DeepScanIcon /> Deep scan
+                          </button>
+                          <button className="mini-btn" onClick={() => setEditing(lib)}>
+                            Edit
+                          </button>
+                          <button className="mini-btn danger" onClick={() => removeLibrary(lib)}>
+                            ✕
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {isScanningThis && (
+                      <div className="lib-row-scan">
+                        <div className="scan-progress-head">
+                          <span>{scanDeep ? "Deep scanning" : "Scanning"}…</span>
+                          <span className="muted">
+                            {scanProgress
+                              ? `${scanProgress.scanned} / ${scanProgress.total}${
+                                  scanProgress.total > 0 ? ` · ${pct(scanFrac)}` : ""
+                                }`
+                              : "preparing…"}
+                          </span>
+                        </div>
+                        <div className="bar" style={{ ["--p" as string]: scanFrac }}>
+                          <span />
+                        </div>
+                        {scanProgress && (
+                          <div
+                            className="scan-progress-file muted"
+                            title={locked ? undefined : scanProgress.path}
+                          >
+                            {maskName(fileName(scanProgress.path))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="lib-row-actions">
-                    <button
-                      className="mini-btn"
-                      onClick={() => runLibrary(lib)}
-                      disabled={store.running || lib.roots.length === 0}
-                      title="Encode this library with its profile"
-                    >
-                      <PlayIcon /> Run
-                    </button>
-                    <button
-                      className="mini-btn"
-                      onClick={() => scanLibrary(lib, false)}
-                      disabled={scanning || lib.roots.length === 0}
-                      title="Health-scan this library's folders"
-                    >
-                      <SearchIcon /> Scan
-                    </button>
-                    <button
-                      className="mini-btn"
-                      onClick={() => scanLibrary(lib, true)}
-                      disabled={scanning || lib.roots.length === 0}
-                      title="Decode each file to catch silent corruption (slower)"
-                    >
-                      <DeepScanIcon /> Deep scan
-                    </button>
-                    <button className="mini-btn" onClick={() => setEditing(lib)}>
-                      Edit
-                    </button>
-                    <button className="mini-btn danger" onClick={() => removeLibrary(lib)}>
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </div>
-      )}
-
-      {scanning && (
-        <div className="card card-flat">
-          <div className="scan-progress">
-            <div className="scan-progress-head">
-              <span>{scanDeep ? "Deep scanning" : "Scanning"}…</span>
-              <span className="muted">
-                {scanProgress
-                  ? `${scanProgress.scanned} / ${scanProgress.total}${
-                      scanProgress.total > 0 ? ` · ${pct(scanFrac)}` : ""
-                    }`
-                  : "preparing…"}
-              </span>
-            </div>
-            <div className="bar" style={{ ["--p" as string]: scanFrac }}>
-              <span />
-            </div>
-            {scanProgress && (
-              <div
-                className="scan-progress-file muted"
-                title={locked ? undefined : scanProgress.path}
-              >
-                {maskName(fileName(scanProgress.path))}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -383,7 +413,7 @@ export function LibraryView({ goDashboard }: Props) {
             // (Same resolution History uses; the manifest keeps the source path as
             // the row's identity, so Remove still targets r.path.)
             const encoded = r.status === "done" || r.status === "normalized";
-            const filePath = currentPath(r.path, encoded);
+            const filePath = currentPath(r.path, encoded, r.out_ext);
             const actions = locked ? null : (
               <>
                 <button className="mini-btn" onClick={() => openFile(filePath)}>

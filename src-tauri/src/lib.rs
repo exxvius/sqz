@@ -97,6 +97,7 @@ pub fn run() {
             commands::pause_run,
             commands::resume_run,
             commands::cancel_run,
+            commands::cancel_scan,
             commands::abort_file,
             commands::retry_file,
             commands::force_file,

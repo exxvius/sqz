@@ -58,6 +58,8 @@ export interface LogEntry {
   savedBytes: number;
   origSize: number | null;
   outSize: number | null;
+  /** Output container extension when re-encoded to a new container, else null. */
+  outExt: string | null;
   at: number;
 }
 
@@ -282,6 +284,7 @@ function reducer(state: State, action: Action): State {
         savedBytes: r.saved_bytes,
         origSize: r.orig_size,
         outSize: r.out_size,
+        outExt: r.out_ext,
         at: Date.now(),
       };
       const session = { ...state.session };
@@ -330,6 +333,8 @@ interface StoreValue extends State {
   clearLog: () => void;
   /** Start a library health scan; progress lands in `scanProgress`. */
   startScan: (config: RunConfig, deep: boolean) => Promise<void>;
+  /** Cancel the in-progress health scan. */
+  cancelScan: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -419,6 +424,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SCAN_FAIL", error: e instanceof Error ? e.message : "Scan failed." });
         }
       },
+      // Flip the backend cancel token; the scan resolves (cancelled) and the
+      // existing done handling clears the scanning state.
+      cancelScan: () => api.cancelScan(),
     }),
     [state],
   );
